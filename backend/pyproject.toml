@@ -52,7 +52,11 @@ show_missing = true
 skip_covered = true
 
 [[tool.mypy.overrides]]
-# Optional benchmark dependency; not installed in CI.
-module = ["sentence_transformers", "sentence_transformers.*"]
+# Optional benchmark dependencies; not installed in CI.
+module = [
+  "sentence_transformers", "sentence_transformers.*",
+  "transformers", "transformers.*", "torch", "torch.*",
+  "bm25s", "bm25s.*", "Stemmer",
+]
 ignore_missing_imports = true
 follow_imports = "skip"

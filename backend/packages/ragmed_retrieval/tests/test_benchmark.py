@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from itertools import count
 from pathlib import Path
 
@@ -5,7 +6,9 @@ import numpy as np
 
 from ragmed_retrieval.benchmark import (
     BenchmarkResult,
+    Pipeline,
     corpus_fingerprint,
+    result_filename,
     results_table,
     run_benchmark,
     top_k,
@@ -13,6 +16,7 @@ from ragmed_retrieval.benchmark import (
 from ragmed_retrieval.chunking import Chunk
 from ragmed_retrieval.embedding import l2_normalize
 from ragmed_retrieval.evalset import EvalQuery
+from ragmed_retrieval.hybrid import BM25Retriever
 from ragmed_retrieval.metrics import RetrievalScores
 from ragmed_retrieval.testing import HashingEmbedder
 
@@ -84,3 +88,35 @@ def test_results_table_sorts_by_ndcg() -> None:
 
 def test_result_serialises_to_json() -> None:
     assert '"ndcg_at_10": 0.8' in _result("m", 0.8).to_json()
+
+
+class ReverseReranker:
+    """Puts candidates in reverse id order, which a perfect ranking cannot survive."""
+
+    name = "org/reverse-reranker"
+
+    def score(self, query: str, passages: Sequence[str]) -> Sequence[float]:
+        return [float(i) for i in range(len(passages))]
+
+
+def test_hybrid_pipeline_is_labelled_and_scored() -> None:
+    pipeline = Pipeline(sparse=BM25Retriever([c.text for c in CHUNKS]))
+
+    result = run_benchmark(HashingEmbedder(), CHUNKS, QUERIES, pipeline=pipeline)
+
+    assert result.pipeline == "hybrid"
+    assert result.reranker is None
+    assert result.scores.hit_at_1 == 1.0
+    assert result_filename(result) == "test__hashing--hybrid.json"
+
+
+def test_reranker_changes_the_ranking() -> None:
+    pipeline = Pipeline(reranker=ReverseReranker(), rerank_depth=4)
+
+    result = run_benchmark(HashingEmbedder(), CHUNKS, QUERIES, pipeline=pipeline)
+
+    assert result.pipeline == "dense+rerank"
+    assert result.reranker == "org/reverse-reranker"
+    assert result.scores.hit_at_1 < 1.0
+    assert result_filename(result) == "test__hashing--dense+rerank--reverse-reranker.json"
+    assert "dense+rerank (`reverse-reranker`)" in results_table([result])

@@ -12,6 +12,11 @@ dependencies = [
 bench = [
   "sentence-transformers>=3.3",
 ]
+# In-memory BM25 for the hybrid benchmark (production uses Qdrant sparse vectors).
+bm25 = [
+  "bm25s>=0.2",
+  "PyStemmer>=2.2",
+]
 
 [build-system]
 requires = ["hatchling>=1.25"]

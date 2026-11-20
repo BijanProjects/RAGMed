@@ -3,7 +3,7 @@ VENV   := .venv
 BIN    := $(VENV)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help venv install install-bench lock lint format typecheck test check clean
+.PHONY: help venv install install-bench lock lint format typecheck test check clean search report significance
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -42,6 +42,16 @@ test: ## Run tests with coverage
 	$(BIN)/pytest --cov
 
 check: lint typecheck test ## Everything CI runs
+
+Q ?= What are the symptoms of asthma?
+search: ## Ask the knowledge base a question on CPU with BGE-M3:  make search Q="..."
+	$(BIN)/python -m ragmed_retrieval search "$(Q)"
+
+report: ## Print the embedding benchmark results table
+	$(BIN)/python -m ragmed_retrieval report
+
+significance: ## Recompute bootstrap confidence intervals for the benchmark
+	$(BIN)/python evals/analysis.py
 
 clean: ## Remove caches and build output
 	rm -rf .mypy_cache .ruff_cache .pytest_cache .coverage coverage.xml htmlcov

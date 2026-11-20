@@ -1,6 +1,6 @@
 # Development environment. Compile with `make lock`.
 -e packages/ragmed_core
--e packages/ragmed_retrieval
+-e packages/ragmed_retrieval[bm25]
 
 mypy
 pip-tools

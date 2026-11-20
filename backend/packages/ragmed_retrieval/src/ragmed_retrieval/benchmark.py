@@ -1,4 +1,8 @@
-"""Dense-retrieval benchmark: embed the corpus once, then score the evaluation set."""
+"""Retrieval benchmark: embed the corpus once, then score the evaluation set.
+
+Three pipelines are compared: dense only, hybrid (dense + BM25 fused with RRF), and either
+of those followed by a reranker over the top `rerank_depth` candidates.
+"""
 
 import hashlib
 import json
@@ -12,10 +16,24 @@ import numpy as np
 from ragmed_retrieval.chunking import Chunk
 from ragmed_retrieval.embedding import Embedder, Vectors
 from ragmed_retrieval.evalset import EvalQuery
+from ragmed_retrieval.hybrid import Reranker, SparseRetriever, rerank_head, rrf_fuse
 from ragmed_retrieval.metrics import RetrievalScores, dedupe, score_run
 
 CANDIDATE_POOL = 100
+RERANK_DEPTH = 40
 LATENCY_SAMPLE = 100
+
+
+@dataclass(frozen=True, slots=True)
+class Pipeline:
+    sparse: SparseRetriever | None = None
+    reranker: Reranker | None = None
+    rerank_depth: int = RERANK_DEPTH
+
+    @property
+    def label(self) -> str:
+        base = "hybrid" if self.sparse is not None else "dense"
+        return f"{base}+rerank" if self.reranker is not None else base
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +45,8 @@ class BenchmarkResult:
     query_p50_ms: float
     query_p95_ms: float
     scores: RetrievalScores
+    pipeline: str = "dense"
+    reranker: str | None = None
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
@@ -49,9 +69,10 @@ def top_k(query_vectors: Vectors, doc_vectors: Vectors, k: int) -> np.ndarray:
     return np.take_along_axis(candidates, order, axis=1)
 
 
-def _cached_document_vectors(
+def document_vectors(
     embedder: Embedder, chunks: Sequence[Chunk], cache_dir: Path | None
 ) -> tuple[Vectors, float]:
+    """Embed every chunk, or load the vectors saved by an earlier run; also returns seconds."""
     path = None
     if cache_dir is not None:
         slug = embedder.name.replace("/", "__")
@@ -68,13 +89,39 @@ def _cached_document_vectors(
     return vectors, elapsed
 
 
+def _retrieve(
+    embedder: Embedder,
+    texts: Sequence[str],
+    doc_vectors: Vectors,
+    chunks: Sequence[Chunk],
+    pipeline: Pipeline,
+) -> list[list[int]]:
+    """Ranked chunk indices per query text."""
+    dense = top_k(embedder.embed_queries(texts), doc_vectors, CANDIDATE_POOL).tolist()
+    if pipeline.sparse is None:
+        ranked: list[list[int]] = dense
+    else:
+        sparse = pipeline.sparse.search(texts, CANDIDATE_POOL)
+        ranked = [rrf_fuse([d, s]) for d, s in zip(dense, sparse, strict=True)]
+    if pipeline.reranker is not None:
+        passages = [c.text for c in chunks]
+        ranked = [
+            rerank_head(text, row, passages, pipeline.reranker, pipeline.rerank_depth)
+            for text, row in zip(texts, ranked, strict=True)
+        ]
+    return ranked
+
+
 def _query_latency_ms(
-    embedder: Embedder, queries: Sequence[EvalQuery], clock: Callable[[], float]
+    retrieve_one: Callable[[str], object],
+    queries: Sequence[EvalQuery],
+    clock: Callable[[], float],
 ) -> tuple[float, float]:
+    """Wall time of the whole pipeline for one query at a time, as a live request sees it."""
     timings = []
     for query in queries[:LATENCY_SAMPLE]:
         start = clock()
-        embedder.embed_queries([query.query])
+        retrieve_one(query.query)
         timings.append((clock() - start) * 1000)
     p50, p95 = np.percentile(timings, [50, 95])
     return float(p50), float(p95)
@@ -85,18 +132,21 @@ def run_benchmark(
     chunks: Sequence[Chunk],
     queries: Sequence[EvalQuery],
     *,
+    pipeline: Pipeline | None = None,
     cache_dir: Path | None = None,
     clock: Callable[[], float] = time.perf_counter,
 ) -> BenchmarkResult:
-    doc_vectors, index_seconds = _cached_document_vectors(embedder, chunks, cache_dir)
-    query_vectors = embedder.embed_queries([q.query for q in queries])
+    pipeline = pipeline or Pipeline()
+    doc_vectors, index_seconds = document_vectors(embedder, chunks, cache_dir)
 
-    ranked_indices = top_k(query_vectors, doc_vectors, CANDIDATE_POOL)
+    ranked = _retrieve(embedder, [q.query for q in queries], doc_vectors, chunks, pipeline)
     results = [
         (dedupe(chunks[i].parent_id for i in row), query.relevant_ids)
-        for row, query in zip(ranked_indices, queries, strict=True)
+        for row, query in zip(ranked, queries, strict=True)
     ]
-    p50, p95 = _query_latency_ms(embedder, queries, clock)
+    p50, p95 = _query_latency_ms(
+        lambda text: _retrieve(embedder, [text], doc_vectors, chunks, pipeline), queries, clock
+    )
 
     return BenchmarkResult(
         model=embedder.name,
@@ -106,20 +156,39 @@ def run_benchmark(
         query_p50_ms=round(p50, 1),
         query_p95_ms=round(p95, 1),
         scores=score_run(results),
+        pipeline=pipeline.label,
+        reranker=pipeline.reranker.name if pipeline.reranker is not None else None,
     )
 
 
 def results_table(results: Sequence[BenchmarkResult]) -> str:
     """Markdown table, best nDCG@10 first."""
     header = (
-        "| Model | Dim | Recall@5 | Recall@10 | nDCG@10 | MRR | Hit@1 | Query p95 (ms) |\n"
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n"
+        "| Model | Pipeline | Dim | Recall@5 | Recall@10 | nDCG@10 | MRR | Hit@1 "
+        "| Query p95 (ms) |\n"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n"
     )
     rows = sorted(results, key=lambda r: r.scores.ndcg_at_10, reverse=True)
     body = "".join(
-        f"| `{r.model}` | {r.dimensions} | {r.scores.recall_at_5:.3f} | "
+        f"| `{r.model}` | {_pipeline_cell(r)} | {r.dimensions} | {r.scores.recall_at_5:.3f} | "
         f"{r.scores.recall_at_10:.3f} | {r.scores.ndcg_at_10:.3f} | {r.scores.mrr:.3f} | "
         f"{r.scores.hit_at_1:.3f} | {r.query_p95_ms:.1f} |\n"
         for r in rows
     )
     return header + body
+
+
+def _pipeline_cell(result: BenchmarkResult) -> str:
+    if result.reranker is None:
+        return result.pipeline
+    return f"{result.pipeline} (`{result.reranker.rsplit('/', 1)[-1]}`)"
+
+
+def result_filename(result: BenchmarkResult, model_id: str | None = None) -> str:
+    """File name for a saved result; `model_id` overrides the embedder's own name."""
+    slug = (model_id or result.model).replace("/", "__")
+    if result.pipeline != "dense":
+        slug += f"--{result.pipeline}"
+    if result.reranker is not None:
+        slug += f"--{result.reranker.rsplit('/', 1)[-1]}"
+    return f"{slug}.json"

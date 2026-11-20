@@ -7,11 +7,13 @@
 -e ./packages/ragmed_core
     # via -r requirements/dev.in
 -e ./packages/ragmed_retrieval
-    # via -r requirements/dev.in
+    # via packages/ragmed-retrieval
 annotated-types==0.8.0
     # via pydantic
 ast-serialize==0.13.1
     # via mypy
+bm25s==0.3.16
+    # via ragmed-retrieval
 build==1.6.1
     # via pip-tools
 cfgv==3.5.0
@@ -41,7 +43,9 @@ mypy-extensions==1.2.0
 nodeenv==1.12.0
     # via pre-commit
 numpy==2.5.5
-    # via ragmed-retrieval
+    # via
+    #   bm25s
+    #   ragmed-retrieval
 packaging==26.3
     # via
     #   build
@@ -74,6 +78,8 @@ pyproject-hooks==1.3.3
     # via
     #   build
     #   pip-tools
+pystemmer==3.1.0
+    # via ragmed-retrieval
 pytest==9.2.0
     # via
     #   -r requirements/dev.in

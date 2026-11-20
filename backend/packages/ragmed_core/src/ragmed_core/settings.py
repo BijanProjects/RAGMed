@@ -47,6 +47,7 @@ class ProviderKeys(BaseSettings):
 
     groq_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
+    cal_api_key: SecretStr | None = None
 
 
 @lru_cache(maxsize=1)

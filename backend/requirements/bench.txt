@@ -18,6 +18,7 @@
     #   ragmed-diagnosis-agent
     #   ragmed-llm
     #   ragmed-mcp-medical
+    #   ragmed-mcp-scheduling
 -e ./services/diagnosis_agent
     # via -r requirements/dev.in
 -e ./packages/ragmed_llm
@@ -26,6 +27,8 @@
     #   ragmed-coordinator-agent
     #   ragmed-diagnosis-agent
 -e ./services/mcp_medical
+    # via -r requirements/dev.in
+-e ./services/mcp_scheduling
     # via -r requirements/dev.in
 -e ./packages/ragmed_retrieval
     # via
@@ -131,6 +134,7 @@ fastmcp==4.2.3
     # via
     #   ragmed-diagnosis-agent
     #   ragmed-mcp-medical
+    #   ragmed-mcp-scheduling
 fastmcp-slim==4.2.3
     # via fastmcp
 filelock==4.2.12
@@ -182,6 +186,7 @@ httpx==0.28.1
     #   langgraph-sdk
     #   qdrant-client
     #   ragmed-a2a
+    #   ragmed-mcp-scheduling
 httpx2==2.16.2
     # via
     #   fastmcp-slim

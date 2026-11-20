@@ -37,6 +37,7 @@ mypy_path = [
   "packages/ragmed_a2a/src",
   "packages/ragmed_llm/src",
   "services/mcp_medical/src",
+  "services/mcp_scheduling/src",
   "services/diagnosis_agent/src",
   "services/coordinator_agent/src",
 ]
@@ -58,6 +59,7 @@ pythonpath = [
   "packages/ragmed_a2a/src",
   "packages/ragmed_llm/src",
   "services/mcp_medical/src",
+  "services/mcp_scheduling/src",
   "services/diagnosis_agent/src",
   "services/coordinator_agent/src",
 ]
@@ -73,6 +75,7 @@ source = [
   "ragmed_a2a",
   "ragmed_llm",
   "mcp_medical",
+  "mcp_scheduling",
   "diagnosis_agent",
   "coordinator_agent",
 ]

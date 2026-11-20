@@ -5,6 +5,7 @@
 -e packages/ragmed_a2a
 -e packages/ragmed_llm
 -e services/mcp_medical
+-e services/mcp_scheduling
 -e services/diagnosis_agent
 -e services/coordinator_agent
 

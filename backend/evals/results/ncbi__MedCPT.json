@@ -1,0 +1,18 @@
+{
+  "model": "ncbi/MedCPT",
+  "chunks": 19020,
+  "dimensions": 768,
+  "index_seconds": 320.3,
+  "query_p50_ms": 8.2,
+  "query_p95_ms": 113.3,
+  "scores": {
+    "queries": 1000,
+    "hit_at_1": 0.254,
+    "recall_at_5": 0.5864023809523811,
+    "recall_at_10": 0.7086841269841271,
+    "ndcg_at_10": 0.4681646356660615,
+    "mrr": 0.405826919449713
+  },
+  "pipeline": "dense",
+  "reranker": null
+}

@@ -1,0 +1,18 @@
+{
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "chunks": 19020,
+  "dimensions": 384,
+  "index_seconds": 0.0,
+  "query_p50_ms": 3.9,
+  "query_p95_ms": 7.1,
+  "scores": {
+    "queries": 1000,
+    "hit_at_1": 0.399,
+    "recall_at_5": 0.7632626984126984,
+    "recall_at_10": 0.8577960317460318,
+    "ndcg_at_10": 0.6215953115675393,
+    "mrr": 0.5537217870453807
+  },
+  "pipeline": "hybrid",
+  "reranker": null
+}

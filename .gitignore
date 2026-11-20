@@ -35,3 +35,6 @@ node_modules/
 .idea/
 .vscode/
 *.swp
+
+# Local-only notes (e.g. PLAN.local.md, the project plan)
+*.local.md

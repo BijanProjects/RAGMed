@@ -10,10 +10,12 @@ backend/
 │  ├─ ragmed_core/            settings, logging, trace ids, URL guard, secret encryption
 │  ├─ ragmed_retrieval/       corpus loading, chunking, embeddings, benchmark, ONNX runtime
 │  ├─ ragmed_vectorstores/    one interface over vector databases (Qdrant, in-memory)
-│  └─ ragmed_a2a/             serving and calling agents over A2A (shared by every agent)
+│  ├─ ragmed_a2a/             serving and calling agents over A2A (shared by every agent)
+│  └─ ragmed_llm/             typed model calls with fallbacks and rate-limit handling
 ├─ services/                  deployable programs: MCP servers and agents
 │  ├─ mcp_medical/            Medical Knowledge MCP server (search tools over the knowledge base)
-│  └─ diagnosis_agent/        answers medical questions with citations, served over A2A
+│  ├─ diagnosis_agent/        answers medical questions with citations, served over A2A
+│  └─ coordinator_agent/      the conversation the web app talks to
 ├─ data/raw/                  the MedQuAD corpus (input, never modified)
 ├─ data/artifacts/            generated files such as cached embeddings (git-ignored)
 ├─ evals/                     the retrieval benchmark
@@ -110,6 +112,24 @@ to see a clinician, which specialty). See its [README](services/diagnosis_agent/
 | `knowledge.py` | Talks to the MCP server: search and the versioned answer prompt |
 | `executor.py` | Serves the graph over A2A, streaming progress |
 | `schema.py`, `app.py` | Data shapes; settings and wiring |
+
+### `coordinator_agent`
+
+The Care Coordinator: the only agent the web app talks to (A2A on port 8000).
+
+| Module | Purpose |
+| --- | --- |
+| `emergency.py` | Red-flag rules checked before any model call: chest pain, stroke signs, breathing, anaphylaxis, bleeding, unconsciousness, poisoning, sudden severe headache, self-harm (988 crisis line) |
+| `router.py` | One small-model call: what the person wants, and their question restated to stand on its own |
+| `graph.py` | Screen → route → ask the Diagnosis agent or reply directly → remember the conversation |
+| `reply.py` | Builds the reply text (answer, sources, next step, disclaimer) and its data |
+| `executor.py`, `app.py` | Serves it over A2A; settings and wiring |
+
+### `ragmed_llm`
+
+`ask_structured(models, Schema, system, user)`: asks the first model for a typed answer and moves
+to the next one when it is rate limited or returns something unparseable. Groq's free tier allows
+8,000 tokens a minute per model, so this is what keeps the demo answering.
 
 ## Commands
 

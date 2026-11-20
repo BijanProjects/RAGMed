@@ -23,9 +23,13 @@ from diagnosis_agent.schema import (
     Passage,
     Urgency,
 )
+from ragmed_core.clinic import GENERAL_PHYSICIAN
 
 TOP_K = 5
+CONDITION_K = 2
+MAX_PASSAGES = 6
 MAX_SEARCHES = 2
+NO_EVIDENCE_REASON = "No matching sources were found, so a full assessment is needed."
 INSUFFICIENT = (
     "I do not have enough information in my medical sources to answer this. Please consult "
     "a medical professional, who can look at your situation directly."
@@ -34,15 +38,28 @@ INSUFFICIENT = (
 # removed whatever the model says: RAGMed never suggests a medication dose.
 _DOSE = re.compile(r"\b\d+(?:[.,]\d+)?\s?(?:mg|mcg|µg|g|ml|mL|IU|units?)\b", re.IGNORECASE)
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
+MIN_LABEL = 20  # questions shorter than this rarely say what they are about
 
 
 class State(TypedDict, total=False):
     question: str
     query: str
+    condition: str
     searches: int
     passages: list[Passage]
     draft: DiagnosisAnswer | None
     result: DiagnosisResult
+
+
+def merge_passages(first: list[Passage], then: list[Passage]) -> list[Passage]:
+    """Both lists in order, each answer once, at most `MAX_PASSAGES`."""
+    seen: set[str] = set()
+    merged: list[Passage] = []
+    for passage in [*first, *then]:
+        if passage.answer_id not in seen:
+            seen.add(passage.answer_id)
+            merged.append(passage)
+    return merged[:MAX_PASSAGES]
 
 
 def number_passages(passages: list[Passage], only: set[int] | None = None) -> str:
@@ -55,6 +72,16 @@ def number_passages(passages: list[Passage], only: set[int] | None = None) -> st
 
 
 _URGENCY_ORDER: list[Urgency] = ["self_care", "routine", "urgent", "emergency"]
+
+
+def label(passage: Passage) -> str:
+    """How to name a source. Some MedQuAD questions lack their subject ("Who is at risk for?"),
+    so those show the passage's opening words instead."""
+    question = passage.question.strip()
+    if re.search(r"\b(for|of|about|is \(are\))\s*\?$", question) or len(question) < MIN_LABEL:
+        opening = " ".join(passage.text.split()[:12])
+        return f"{question} {opening}…"
+    return question
 
 
 def remove_doses(text: str) -> str:
@@ -76,7 +103,9 @@ def remove_sentences(text: str, unsupported: list[str]) -> str:
     return " ".join(kept).strip()
 
 
-def insufficient_result(query: str, urgency: Urgency = "routine") -> DiagnosisResult:
+def insufficient_result(
+    query: str, urgency: Urgency = "routine", draft: DiagnosisAnswer | None = None
+) -> DiagnosisResult:
     """No usable answer: always advise a clinician, and never lower an urgency already found."""
     floor = max(urgency, "routine", key=_URGENCY_ORDER.index)
     return DiagnosisResult(
@@ -85,7 +114,10 @@ def insufficient_result(query: str, urgency: Urgency = "routine") -> DiagnosisRe
         possible_conditions=[],
         urgency=floor,
         recommend_visit=True,
-        specialty=None,
+        # Without evidence, a general physician sees them first, with time to assess.
+        clinician_type=draft.clinician_type if draft else GENERAL_PHYSICIAN,
+        visit_minutes=draft.visit_minutes if draft else 30,
+        visit_reason=draft.visit_reason if draft else NO_EVIDENCE_REASON,
         sufficient_evidence=False,
         search_query=query,
     )
@@ -95,20 +127,20 @@ def finalise(draft: DiagnosisAnswer, passages: list[Passage], query: str) -> Dia
     """Apply the rules that must hold whatever the model returned."""
     answer = remove_doses(draft.answer)
     if not answer:
-        return insufficient_result(query, draft.urgency)
+        return insufficient_result(query, draft.urgency, draft)
     numbers = sorted({n for n in draft.citations if 1 <= n <= len(passages)})
     return DiagnosisResult(
         answer=answer,
         citations=[
-            Citation(
-                number=n, answer_id=passages[n - 1].answer_id, question=passages[n - 1].question
-            )
+            Citation(number=n, answer_id=passages[n - 1].answer_id, question=label(passages[n - 1]))
             for n in numbers
         ],
         possible_conditions=draft.possible_conditions,
         urgency=draft.urgency,
         recommend_visit=draft.recommend_visit or draft.urgency in ("urgent", "emergency"),
-        specialty=draft.specialty,
+        clinician_type=draft.clinician_type,
+        visit_minutes=draft.visit_minutes,
+        visit_reason=draft.visit_reason,
         sufficient_evidence=True,
         search_query=query,
     )
@@ -117,11 +149,22 @@ def finalise(draft: DiagnosisAnswer, passages: list[Passage], query: str) -> Dia
 def build_graph(knowledge: Knowledge, reasoner: Reasoner) -> CompiledStateGraph[Any]:
     async def rewrite(state: State) -> State:
         previous = state.get("query") if state.get("searches") else None
-        query = await reasoner.search_query(state["question"], previous)
-        return {"query": query, "searches": state.get("searches", 0) + 1}
+        search = await reasoner.search_query(state["question"], previous)
+        return {
+            "query": search.query,
+            "condition": search.condition.strip(),
+            "searches": state.get("searches", 0) + 1,
+        }
 
     async def retrieve(state: State) -> State:
-        return {"passages": await knowledge.search(state["query"], TOP_K)}
+        passages = await knowledge.search(state["query"], TOP_K)
+        if state.get("condition"):
+            # Detailed queries can rank rare variants above the common condition's own page
+            # (e.g. "migraine with aura" finds hemiplegic migraine first), so its plain name is
+            # searched too, and those passages lead.
+            named = await knowledge.search(state["condition"], CONDITION_K)
+            passages = merge_passages(named, passages)
+        return {"passages": passages}
 
     async def generate(state: State) -> State:
         if not state["passages"]:
@@ -151,9 +194,8 @@ def build_graph(knowledge: Knowledge, reasoner: Reasoner) -> CompiledStateGraph[
 
     async def insufficient(state: State) -> State:
         draft = state.get("draft")
-        return {
-            "result": insufficient_result(state["query"], draft.urgency if draft else "routine")
-        }
+        urgency = draft.urgency if draft else "routine"
+        return {"result": insufficient_result(state["query"], urgency, draft)}
 
     graph = StateGraph(State)
     graph.add_node("rewrite", rewrite)

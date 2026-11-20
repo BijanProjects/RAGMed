@@ -3,6 +3,7 @@ import pytest
 
 from diagnosis_agent.app import DiagnosisSettings, create_diagnosis_app
 from diagnosis_agent.executor import AT_CAPACITY
+from diagnosis_agent.schema import SearchQuery
 from diagnosis_agent.testing import PASSAGES, FakeKnowledge, FakeReasoner
 from ragmed_a2a.client import Progress, RemoteAgent, Reply
 from ragmed_core.settings import Environment
@@ -55,7 +56,7 @@ async def test_an_empty_question_is_rejected() -> None:
 
 async def test_a_failure_inside_the_graph_fails_the_task_politely() -> None:
     class Broken(FakeReasoner):
-        async def search_query(self, question: str, previous: str | None) -> str:
+        async def search_query(self, question: str, previous: str | None) -> SearchQuery:
             raise RuntimeError("model is down")
 
     events = await ask("Why?", Broken(answerable=[]), FakeKnowledge([PASSAGES]))
@@ -93,7 +94,7 @@ async def test_tokens_protect_the_agent_and_appear_on_its_card() -> None:
 
 async def test_at_capacity_gets_a_clear_message() -> None:
     class Busy(FakeReasoner):
-        async def search_query(self, question: str, previous: str | None) -> str:
+        async def search_query(self, question: str, previous: str | None) -> SearchQuery:
             raise AtCapacityError("429")
 
     events = await ask("Why?", Busy(answerable=[]), FakeKnowledge([PASSAGES]))

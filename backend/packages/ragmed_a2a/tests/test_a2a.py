@@ -1,3 +1,5 @@
+from typing import Any
+
 import httpx
 import pytest
 from a2a.helpers import new_data_part, new_text_part
@@ -49,7 +51,7 @@ def build(tokens: dict[str, str] | None = None) -> httpx.ASGITransport:
     return httpx.ASGITransport(app=create_app(agent_card(spec), Echo(), tokens=tokens))
 
 
-async def collect(agent: RemoteAgent, text: str, **kwargs: str) -> list[Progress | Reply]:
+async def collect(agent: RemoteAgent, text: str, **kwargs: Any) -> list[Progress | Reply]:
     try:
         return [event async for event in agent.stream(text, **kwargs)]
     finally:

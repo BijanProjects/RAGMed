@@ -16,7 +16,17 @@ system offers real appointment slots and books one after the patient confirms.
 
 ## Try it locally
 
-You need Python 3.12 and about 3 GB of disk space for the models.
+You need Python 3.12, Node.js 20 and about 3 GB of disk space for the models, plus a free
+[Groq](https://console.groq.com) API key in a `.env` file at the repository root
+(`GROQ_API_KEY=...`).
+
+**The whole app** (three backend services and the web chat), once the setup below is done:
+
+```bash
+make demo        # then open http://localhost:3000
+```
+
+**First-time setup:**
 
 ```bash
 cd backend
@@ -25,7 +35,8 @@ make check            # lint, strict type check, 180+ tests: should end with "pa
 make install-bench    # add PyTorch and the embedding models' libraries (~1 GB)
 make export-onnx      # build the fast int8 model the server uses (569 MB, about a minute)
 
-make search Q="What are the symptoms of asthma?"
+make search Q="What are the symptoms of asthma?"   # embeds the knowledge base once
+make mcp-ingest       # loads it into the local vector store (about 10 seconds)
 ```
 
 The first search downloads BGE-M3 (2.3 GB) and embeds the whole knowledge base once (about 10
@@ -66,8 +77,8 @@ flowchart LR
 
     classDef done fill:#d3f9d8,stroke:#2b8a3e,color:#000
     classDef planned fill:#f1f3f5,stroke:#868e96,color:#000,stroke-dasharray: 4 3
-    class diag,mcpmed,retr,vs,kb done
-    class web,coord,sched,mcpcal,cal planned
+    class web,coord,diag,mcpmed,retr,vs,kb done
+    class sched,mcpcal,cal planned
 ```
 
 Three ideas carry the whole design:
@@ -98,7 +109,8 @@ RAGMed/
 │  │  └─ ragmed_a2a/                 how agents serve and call each other over A2A
 │  ├─ services/                      runnable programs: MCP servers and agents
 │  │  ├─ mcp_medical/                Medical Knowledge MCP server: search tools for the agents
-│  │  └─ diagnosis_agent/            answers medical questions with citations (LangGraph, A2A)
+│  │  ├─ diagnosis_agent/            answers medical questions with citations (LangGraph, A2A)
+│  │  └─ coordinator_agent/          the conversation: emergency screening, routing, replies
 │  ├─ evals/                         the embedding benchmark
 │  │  ├─ data/                       1,000 frozen test questions
 │  │  ├─ results/                    one JSON file per model and pipeline (+ per-query scores)
@@ -111,7 +123,8 @@ RAGMed/
 │  ├─ requirements/                  *.in = what we want, *.txt = exact pinned versions
 │  ├─ pyproject.toml                 ruff, mypy and pytest settings
 │  └─ Makefile                       every command: make help
-├─ frontend/                         Next.js web app (not started yet)
+├─ frontend/                         Next.js web chat: the page and its /api/chat route
+├─ scripts/demo.sh                   runs everything locally: make demo
 ├─ docs/adr/                         architecture decision records: why each big choice was made
 ├─ .github/workflows/ci.yml          lint, type-check and test on every pull request
 └─ README.md                         this file
@@ -131,6 +144,8 @@ RAGMed/
 | See how user-supplied URLs and keys are kept safe | [`urlguard.py`](backend/packages/ragmed_core/src/ragmed_core/urlguard.py), [`secrets.py`](backend/packages/ragmed_core/src/ragmed_core/secrets.py) |
 | See the tools the agents will use | [`services/mcp_medical/`](backend/services/mcp_medical/) and its [README](backend/services/mcp_medical/README.md) |
 | See how an answer is produced | [`diagnosis_agent/graph.py`](backend/services/diagnosis_agent/src/diagnosis_agent/graph.py) |
+| See how emergencies are caught | [`coordinator_agent/emergency.py`](backend/services/coordinator_agent/src/coordinator_agent/emergency.py) |
+| Change the chat page | [`frontend/src/components/chat.tsx`](frontend/src/components/chat.tsx) |
 | Read why a decision was made | [`docs/adr/`](docs/adr/) |
 | Read the raw benchmark numbers | [`backend/evals/results/`](backend/evals/results/) |
 | Change settings, logging or tracing | [`ragmed_core/`](backend/packages/ragmed_core/src/ragmed_core/) |
@@ -147,8 +162,8 @@ on Vercel. The plan's folders map across one to one:
 | Plan | This repository |
 | --- | --- |
 | `packages/ragmed_core`, `packages/ragmed_retrieval` | `backend/packages/…` |
-| `services/mcp_medical`, `services/diagnosis_agent` | `backend/services/…` |
-| `services/coordinator_agent`, `scheduling_agent`, `mcp_scheduling` | `backend/services/…` (to be created) |
+| `services/mcp_medical`, `diagnosis_agent`, `coordinator_agent` | `backend/services/…` |
+| `services/scheduling_agent`, `mcp_scheduling` | `backend/services/…` (to be created) |
 | `evals/` | `backend/evals/` |
 | `apps/web` | `frontend/` |
 
@@ -408,10 +423,10 @@ flowchart LR
   Weaviate and Pinecone next)*
 - [x] Medical Knowledge MCP server
 - [ ] Scheduling MCP server (Cal.com)
-- [ ] Diagnosis, Scheduling and Care Coordinator agents over A2A (Groq models) *(Diagnosis agent
-  working; Care Coordinator next)*
+- [ ] Diagnosis, Scheduling and Care Coordinator agents over A2A (Groq models) *(Diagnosis and
+  Care Coordinator working; Scheduling needs the Cal.com account)*
 - [ ] Observability and evaluation suite
-- [ ] Web frontend
+- [ ] Web frontend *(chat working locally; Vercel deployment next)*
 - [ ] Infrastructure as code and continuous deployment (Oracle Cloud Always Free VM)
 
 ## Data

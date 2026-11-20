@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from diagnosis_agent.schema import DiagnosisAnswer, GroundingCheck, Passage
+from diagnosis_agent.schema import DiagnosisAnswer, GroundingCheck, Passage, SearchQuery
 
 PASSAGES = [
     Passage(answer_id="a1", question="What causes asthma?", qtype="causes",
@@ -36,17 +36,20 @@ class FakeReasoner:
             possible_conditions=["asthma"],
             urgency="routine",
             recommend_visit=True,
-            specialty="pulmonology",
+            clinician_type="Pulmonology",
+            visit_minutes=30,
+            visit_reason="Breathing problems need a specialist assessment.",
         )
     )
     unsupported: list[str] = field(default_factory=list)
+    condition: str = ""
     calls: list[str] = field(default_factory=list)
     previous_queries: list[str | None] = field(default_factory=list)
 
-    async def search_query(self, question: str, previous: str | None) -> str:
+    async def search_query(self, question: str, previous: str | None) -> SearchQuery:
         self.calls.append("rewrite")
         self.previous_queries.append(previous)
-        return f"query {len(self.previous_queries)}"
+        return SearchQuery(query=f"query {len(self.previous_queries)}", condition=self.condition)
 
     async def answer(self, instructions: str) -> DiagnosisAnswer:
         self.calls.append("answer")

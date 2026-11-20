@@ -8,8 +8,10 @@ dependencies = [
   "langchain-core>=1.8,<2",
   "langchain-groq>=1.2,<2",
   "langgraph>=1.2,<2",
+  "langgraph-checkpoint-postgres>=3",
+  "psycopg[binary,pool]>=3.2",
   "ragmed-a2a",
-  "ragmed-core",
+  "ragmed-core[valkey]",
   "ragmed-llm",
   "uvicorn>=0.30",
 ]

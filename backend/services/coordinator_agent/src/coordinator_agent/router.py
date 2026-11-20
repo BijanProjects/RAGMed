@@ -1,5 +1,6 @@
 """Decide what the person wants, and restate a follow-up as a self-contained question."""
 
+import re
 from collections.abc import Sequence
 from typing import Literal, Protocol
 
@@ -23,6 +24,17 @@ ROUTE = """You route messages for RAGMed Clinic's intake assistant. Decide what 
 
 For medical_question, also write `question`: their question rewritten to stand on its own using
 the conversation so far. Otherwise leave `question` empty."""
+
+
+# Requests the clinic always handles, whatever the model decides: a renewal, a refill or a note.
+CLINIC_REQUEST = re.compile(
+    r"\b(renew\w*|refill\w*|prescriptions?|sick note|doctor'?s note|medical certificate)\b",
+    re.IGNORECASE,
+)
+
+
+def is_clinic_request(message: str) -> bool:
+    return CLINIC_REQUEST.search(message) is not None
 
 
 class Route(BaseModel):

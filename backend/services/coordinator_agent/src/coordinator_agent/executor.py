@@ -10,7 +10,9 @@ from a2a.types import TaskState
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
+from coordinator_agent.limits import Limits, client_ip, message_limit
 from ragmed_a2a.server import start_task
+from ragmed_core.ratelimit import MemoryRateLimiter, RateLimiter
 from ragmed_llm import AtCapacityError
 
 log = structlog.get_logger()
@@ -24,7 +26,7 @@ FAILED = "Something went wrong on our side. Please try again."
 ROUTING = "Reading your message"
 
 
-ACTIONS = {"show_slots", "book"}
+ACTIONS = {"show_slots", "book", "resend", "confirm"}
 
 
 def read_action(context: RequestContext) -> dict[str, Any] | None:
@@ -34,14 +36,21 @@ def read_action(context: RequestContext) -> dict[str, Any] | None:
     for data in get_data_parts(context.message.parts):
         action = data.get("action") if isinstance(data, dict) else None
         if isinstance(action, dict) and action.get("type") in ACTIONS:
-            fields = ("type", "start", "clinician_type", "name", "email")
+            fields = ("type", "start", "clinician_type", "name", "email", "code")
             return {k: v for k, v in action.items() if k in fields}
     return None
 
 
 class CoordinatorExecutor(AgentExecutor):
-    def __init__(self, graph: CompiledStateGraph[Any]) -> None:
+    def __init__(
+        self,
+        graph: CompiledStateGraph[Any],
+        limiter: RateLimiter | None = None,
+        limits: Limits | None = None,
+    ) -> None:
         self._graph = graph
+        self._limiter = limiter or MemoryRateLimiter()
+        self._limits = limits or Limits()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         updater = await start_task(context, event_queue)
@@ -51,13 +60,23 @@ class CoordinatorExecutor(AgentExecutor):
             reason = f"Please send a message of 1 to {MAX_MESSAGE_CHARS:,} characters."
             await updater.reject(updater.new_agent_message([new_text_part(reason)]))
             return
+        ip = client_ip(context)
+        refusal = await message_limit(self._limiter, self._limits, ip, str(context.context_id))
+        if refusal:
+            await updater.reject(updater.new_agent_message([new_text_part(refusal)]))
+            return
 
         await updater.start_work(updater.new_agent_message([new_text_part(ROUTING)]))
         # One saved conversation per A2A context, so follow-up questions have their history.
         config: RunnableConfig = {"configurable": {"thread_id": str(context.context_id)}}
         reply: dict[str, Any] | None = None
         try:
-            turn = {"message": message, "action": action, "session": str(context.context_id)}
+            turn = {
+                "message": message,
+                "action": action,
+                "session": str(context.context_id),
+                "client": ip,
+            }
             async for event in self._graph.astream(turn, config, stream_mode=["custom", "updates"]):
                 # With several stream modes, each event is a (mode, payload) pair.
                 mode, data = cast(tuple[str, dict[str, Any]], event)

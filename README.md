@@ -20,11 +20,17 @@ You need Python 3.12, Node.js 20 and about 3 GB of disk space for the models, pl
 [Groq](https://console.groq.com) API key in a `.env` file at the repository root
 (`GROQ_API_KEY=...`).
 
-**The whole app** (three backend services and the web chat), once the setup below is done:
+**The whole app** (the backend services and the web chat), once the setup below is done:
 
 ```bash
 make demo        # then open http://localhost:3000
 ```
+
+If Docker is running (Docker Desktop or [Colima](https://github.com/abiosoft/colima)), `make demo`
+also starts Postgres, which saves conversations, and Valkey, which keeps the rate limits
+(`make infra-up` / `make infra-down` start and stop them on their own). Without Docker, both are
+kept in memory. With `CAL_API_KEY` in `.env`, bookings go to Cal.com; otherwise to a built-in test
+calendar.
 
 **First-time setup:**
 
@@ -68,17 +74,21 @@ flowchart LR
     vs["Vector store interface<br/>Qdrant adapter"]
     kb[("MedQuAD<br/>knowledge base")]
     cal[("Cal.com")]
+    pg[("Postgres<br/>conversations")]
+    vk[("Valkey<br/>rate limits")]
 
     user --> web -->|A2A| coord
     coord -->|A2A| diag
     coord -->|A2A| sched
     diag -->|MCP| mcpmed --> retr --> vs --> kb
     sched -->|MCP| mcpcal --> cal
+    coord --- pg
+    coord --- vk
 
     classDef done fill:#d3f9d8,stroke:#2b8a3e,color:#000
     classDef planned fill:#f1f3f5,stroke:#868e96,color:#000,stroke-dasharray: 4 3
-    class web,coord,diag,mcpmed,retr,vs,kb done
-    class sched,mcpcal,cal planned
+    class web,coord,diag,mcpmed,retr,vs,kb,mcpcal,cal,pg,vk done
+    class sched planned
 ```
 
 Three ideas carry the whole design:
@@ -91,6 +101,37 @@ Three ideas carry the whole design:
   through A2A messages, never by importing each other's code.
 - **MCP** (Model Context Protocol): agents never touch a database or an outside API directly. They
   call a small, fixed set of tools on an MCP server, which limits what an agent can do.
+
+## Protection against abuse
+
+The clinic is a free public demo that calls paid-for language models and books real calendar
+slots, so every request passes these checks:
+
+| Check | Where | Limit |
+| --- | --- | --- |
+| Bot check ([Cloudflare Turnstile](https://www.cloudflare.com/products/turnstile/)) | Web app | Once per browser; a signed cookie then lasts 12 hours |
+| Messages per IP address | Coordinator | 40 per hour |
+| Messages per conversation | Coordinator | 60 per day |
+| Bookings per IP address | Coordinator | 3 per day |
+| Bookings for the whole clinic | Coordinator | 40 per day |
+| Email verification before booking | Coordinator | A 6-digit code, valid 10 minutes, 5 tries |
+| Verification codes sent | Coordinator | 3 per address and 6 per IP address per hour |
+| Request checks (action type, name, email, code) | Web app and Scheduling server | Refused before any model call |
+
+- Counters live in **Valkey** (an open-source Redis), so every copy of the Coordinator shares
+  them. If Valkey is down, requests are let through and the failure is logged: the bot check
+  still applies, and an outage of the limiter does not take the clinic offline.
+- A visit is booked only after the patient types in a code sent to their email, so nobody can
+  book visits, or send calendar invitations, in someone else's name. The code never appears in
+  the chat, only a salted hash of it is stored, and the booking uses the verified details, not
+  whatever the browser sends afterwards. Codes are sent over SMTP (a Gmail app password works,
+  for free); without one, local runs write the code to the Coordinator's log.
+- Conversations are saved in **Postgres** (LangGraph's checkpointer), so a restart or a new
+  deployment does not lose them.
+- Only the web app can reach the Coordinator: it sends a service token and the visitor's IP
+  address, which it reads from Vercel's headers.
+- Without `TURNSTILE_SECRET_KEY`, the bot check is off (local development). `make demo` uses
+  Cloudflare's published test keys, which always pass.
 
 ## Project structure
 
@@ -422,9 +463,10 @@ flowchart LR
 - [ ] Vector store connectors with shared contract tests *(Qdrant and in-memory done; pgvector,
   Weaviate and Pinecone next)*
 - [x] Medical Knowledge MCP server
-- [ ] Scheduling MCP server (Cal.com)
-- [ ] Diagnosis, Scheduling and Care Coordinator agents over A2A (Groq models) *(Diagnosis and
-  Care Coordinator working; Scheduling needs the Cal.com account)*
+- [x] Scheduling MCP server (Cal.com, with a built-in test calendar for development)
+- [x] Diagnosis and Care Coordinator agents over A2A (Groq models): adaptive intake, draft
+  pre-visit report, booking in the chat
+- [x] Abuse protection: bot check, rate limits, booking caps, conversations in Postgres
 - [ ] Observability and evaluation suite
 - [ ] Web frontend *(chat working locally; Vercel deployment next)*
 - [ ] Infrastructure as code and continuous deployment (Oracle Cloud Always Free VM)

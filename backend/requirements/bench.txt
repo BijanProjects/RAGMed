@@ -13,7 +13,7 @@
     # via -r requirements/dev.in
 -e ./packages/ragmed_core
     # via
-    #   -r requirements/dev.in
+    #   packages/ragmed-core
     #   ragmed-coordinator-agent
     #   ragmed-diagnosis-agent
     #   ragmed-llm
@@ -261,7 +261,10 @@ langgraph==1.2.24
 langgraph-checkpoint==4.3.2
     # via
     #   langgraph
+    #   langgraph-checkpoint-postgres
     #   langgraph-prebuilt
+langgraph-checkpoint-postgres==3.2.1
+    # via ragmed-coordinator-agent
 langgraph-prebuilt==1.1.3
     # via langgraph
 langgraph-sdk==0.4.14
@@ -324,6 +327,7 @@ opentelemetry-api==1.45.2
     #   mcp
 orjson==3.13.0
     # via
+    #   langgraph-checkpoint-postgres
     #   langgraph-sdk
     #   langsmith
 ormsgpack==1.13.1
@@ -370,6 +374,16 @@ protobuf==7.36.2
     #   onnxruntime
     #   proto-plus
     #   qdrant-client
+psycopg==3.3.9
+    # via
+    #   langgraph-checkpoint-postgres
+    #   ragmed-coordinator-agent
+psycopg-binary==3.3.9
+    # via psycopg
+psycopg-pool==3.3.3
+    # via
+    #   langgraph-checkpoint-postgres
+    #   psycopg
 py-key-value-aio==0.5.0
     # via fastmcp-slim
 pyasn1==0.6.5
@@ -441,6 +455,8 @@ pyyaml==6.0.3
     #   transformers
 qdrant-client==1.20.0
     # via ragmed-vectorstores
+redis==8.1.0
+    # via ragmed-core
 referencing==0.37.0
     # via
     #   jsonschema
@@ -544,6 +560,8 @@ typing-extensions==4.16.0
     #   mypy
     #   onnx
     #   opentelemetry-api
+    #   psycopg
+    #   psycopg-pool
     #   py-key-value-aio
     #   pydantic
     #   pydantic-core

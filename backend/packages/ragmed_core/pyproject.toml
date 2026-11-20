@@ -10,6 +10,12 @@ dependencies = [
   "structlog>=24.4",
 ]
 
+[project.optional-dependencies]
+# Shared rate-limit counters (Valkey is an open-source Redis).
+valkey = [
+  "redis>=5",
+]
+
 [build-system]
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"

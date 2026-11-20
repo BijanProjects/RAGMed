@@ -14,6 +14,14 @@ export default defineConfig({
     command: "npm run dev -- --port 3100",
     url: "http://localhost:3100",
     reuseExistingServer: !process.env.CI,
-    env: { NEXT_TELEMETRY_DISABLED: "1", NEXT_PUBLIC_CLINIC_TIME_ZONE: "America/St_Johns" },
+    env: {
+      NEXT_TELEMETRY_DISABLED: "1",
+      NEXT_PUBLIC_CLINIC_TIME_ZONE: "America/St_Johns",
+      // Cloudflare's published Turnstile test keys: they always pass.
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: "1x00000000000000000000AA",
+      TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA",
+      SESSION_SECRET: "test-only-session-secret-0123456789abcdef",
+      COORDINATOR_URL: "http://127.0.0.1:9", // nothing listens: these tests never reach it
+    },
   },
 });

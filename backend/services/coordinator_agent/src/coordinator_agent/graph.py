@@ -32,6 +32,7 @@ from coordinator_agent.intake import (
     merge,
     quick_replies,
 )
+from coordinator_agent.limits import Limits, booking_limit
 from coordinator_agent.reply import (
     BOOKING_START,
     DISCLAIMER,
@@ -48,6 +49,7 @@ from coordinator_agent.scheduling import Scheduling, SchedulingError
 from ragmed_a2a.client import AgentEvent, Progress
 from ragmed_a2a.client import Reply as AgentReply
 from ragmed_core.clinic import CLINICIAN_TYPES, GENERAL_PHYSICIAN
+from ragmed_core.ratelimit import MemoryRateLimiter, RateLimiter
 
 HISTORY_TURNS = 6
 HISTORY_CHARS = 600
@@ -69,6 +71,7 @@ class State(TypedDict, total=False):
     message: str
     action: dict[str, Any] | None
     session: str
+    client: str
     # Saved across turns
     history: Annotated[list[Turn], operator.add]
     phase: str  # "chat" | "intake" | "report" | "booked"
@@ -104,8 +107,14 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
     interviewer: Interviewer,
     diagnosis: Diagnosis,
     scheduling: Scheduling,
+    *,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
+    limiter: RateLimiter | None = None,
+    limits: Limits | None = None,
 ) -> CompiledStateGraph[Any]:
+    limiter = limiter or MemoryRateLimiter()
+    limits = limits or Limits()
+
     async def screen_node(state: State) -> State:
         flag = screen(state.get("message", ""))
         if flag is None:
@@ -206,6 +215,9 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
                 if not name or not email.strip():
                     text = "Please enter your name and email so we can send your invitation."
                     return {"reply": Reply(kind="no_answer", text=text).model_dump()}
+                refusal = await booking_limit(limiter, limits, state.get("client", "unknown"))
+                if refusal:
+                    return {"reply": Reply(kind="no_answer", text=refusal).model_dump()}
                 start = str(action.get("start", ""))
                 return await _book(state, offer, kind=kind, start=start, name=name, email=email)
             slots = await scheduling.find_slots(kind, int(offer["visit_minutes"]))

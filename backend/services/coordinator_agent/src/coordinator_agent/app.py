@@ -1,7 +1,9 @@
 """Build the Care Coordinator from settings and serve it over A2A."""
 
 import dataclasses
+from typing import Any
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import Field, SecretStr
 from pydantic_settings import SettingsConfigDict
@@ -10,10 +12,12 @@ from starlette.types import ASGIApp
 from coordinator_agent.executor import CoordinatorExecutor
 from coordinator_agent.graph import Diagnosis, build_graph
 from coordinator_agent.intake import Interviewer, LlmInterviewer
+from coordinator_agent.limits import Limits
 from coordinator_agent.router import LlmRouter, Router
 from coordinator_agent.scheduling import McpScheduling, Scheduling
 from ragmed_a2a.client import RemoteAgent
 from ragmed_a2a.server import CardSpec, Skill, agent_card, create_app
+from ragmed_core.ratelimit import RateLimiter
 from ragmed_core.settings import CoreSettings, Environment
 
 
@@ -32,6 +36,10 @@ class CoordinatorSettings(CoreSettings):
     scheduling_token: SecretStr | None = None
     small_models: tuple[str, ...] = ("openai/gpt-oss-20b", "qwen/qwen3.8-27b")
     small_reasoning: str = "low"
+    # Shared rate-limit counters; without it, counters live in this process's memory.
+    valkey_url: str | None = None
+    # Saved conversations; without it, they live in memory and are lost on restart.
+    database_url: SecretStr | None = None
     # Callers allowed to use this agent (the web app): JSON object of name to token.
     service_tokens: dict[str, SecretStr] = Field(default_factory=dict)
 
@@ -80,6 +88,9 @@ def create_coordinator_app(
     interviewer: Interviewer | None = None,
     diagnosis: Diagnosis | None = None,
     scheduling: Scheduling | None = None,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
+    limiter: RateLimiter | None = None,
+    limits: Limits | None = None,
 ) -> ASGIApp:
     tokens = {name: token.get_secret_value() for name, token in settings.service_tokens.items()}
     if not tokens and settings.environment is Environment.PRODUCTION:
@@ -89,8 +100,10 @@ def create_coordinator_app(
         interviewer or _llm_interviewer(settings),
         diagnosis or RemoteAgent(settings.diagnosis_url, _secret(settings.diagnosis_token)),
         scheduling or McpScheduling(settings.scheduling_url, _secret(settings.scheduling_token)),
-        # In memory for now: conversations are lost on restart. Postgres comes with deployment.
-        checkpointer=InMemorySaver(),
+        checkpointer=checkpointer or InMemorySaver(),
+        limiter=limiter,
+        limits=limits,
     )
     spec = dataclasses.replace(CARD, url=settings.public_url, requires_auth=bool(tokens))
-    return create_app(agent_card(spec), CoordinatorExecutor(graph), tokens=tokens or None)
+    executor = CoordinatorExecutor(graph, limiter=limiter, limits=limits)
+    return create_app(agent_card(spec), executor, tokens=tokens or None)

@@ -1,0 +1,31 @@
+# Local databases for development: Postgres (saved conversations) and Valkey (rate limits).
+# Bound to localhost only. Start with `make infra-up` from the repository root.
+name: ragmed-dev
+
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_DB: ragmed
+      POSTGRES_USER: ragmed
+      POSTGRES_PASSWORD: ragmed-local-only
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ragmed -d ragmed"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  valkey:
+    image: valkey/valkey:8.0-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres:

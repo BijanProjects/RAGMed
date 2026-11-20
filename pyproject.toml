@@ -26,6 +26,8 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["packages"]
+mypy_path = ["packages/ragmed_core/src"]
+explicit_package_bases = true
 exclude = ["^legacy/"]
 warn_unreachable = true
 
@@ -36,6 +38,7 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["packages"]
+pythonpath = ["packages/ragmed_core/src"]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
 filterwarnings = ["error"]
 

@@ -21,6 +21,12 @@ function reply(kind: string, text: string, extra: Record<string, unknown> = {}) 
   };
 }
 
+/** Opens the chat and waits for the bot check (Cloudflare's test key always passes). */
+async function openChat(page: Page) {
+  await page.goto("/");
+  await expect(page.locator('[data-check="ready"]')).toBeAttached({ timeout: 20_000 });
+}
+
 /** Answers /api/chat from a script and records every request the page sends. */
 async function mockChat(page: Page, script: (body: Record<string, unknown>) => object[]) {
   const requests: Record<string, unknown>[] = [];
@@ -56,7 +62,7 @@ test("the whole intake: questions, report, times, confirmation, booking", async 
     return [reply("question", "How long have you had these headaches?", { quick_replies: ["A day", "About a month"] })];
   });
 
-  await page.goto("/");
+  await openChat(page);
   await page.getByRole("button", { name: /headaches on one side/ }).click();
   await expect(page.getByText("How long have you had these headaches?")).toBeVisible();
 
@@ -85,6 +91,8 @@ test("the whole intake: questions, report, times, confirmation, booking", async 
   await expect(page.getByText("RC-TEST42")).toBeVisible();
   await expect(page.getByText(/invitation is on its way by email/)).toBeVisible();
 
+  expect(requests[0].turnstileToken).toBeTruthy(); // the first message carries the check
+  expect(requests.slice(1).every((r) => !r.turnstileToken)).toBe(true); // then the cookie does
   expect(requests.map((r) => r.action ?? r.message)).toEqual([
     "I've had headaches on one side for a month",
     "About a month",
@@ -104,7 +112,7 @@ test("choosing a general physician instead asks for their times", async ({ page 
       : [reply("report", "## Draft pre-visit report", { urgency: "routine", offer: OFFER })],
   );
 
-  await page.goto("/");
+  await openChat(page);
   await page.getByLabel("Your message").fill("my head hurts");
   await page.getByLabel("Your message").press("Enter");
   await page.getByRole("button", { name: "A general physician instead" }).click();
@@ -120,7 +128,7 @@ test("an emergency is shown as a red card with the emergency badge", async ({ pa
     }),
   ]);
 
-  await page.goto("/");
+  await openChat(page);
   await page.getByLabel("Your message").fill("crushing chest pain");
   await page.getByRole("button", { name: "Send" }).click();
 
@@ -132,7 +140,7 @@ test("an emergency is shown as a red card with the emergency badge", async ({ pa
 test("progress is shown while the agents work, and errors are readable", async ({ page }) => {
   await mockChat(page, () => [{ type: "progress", text: "Searching the medical knowledge base" }, { type: "error", text: "The RAGMed service is not reachable right now." }]);
 
-  await page.goto("/");
+  await openChat(page);
   await page.getByLabel("Your message").fill("hello");
   await page.getByRole("button", { name: "Send" }).click();
 
@@ -142,7 +150,7 @@ test("progress is shown while the agents work, and errors are readable", async (
 test("a new conversation starts fresh", async ({ page }) => {
   const requests = await mockChat(page, () => [reply("greeting", "Hi, I'm the intake assistant.")]);
 
-  await page.goto("/");
+  await openChat(page);
   await page.getByLabel("Your message").fill("hello");
   await page.getByLabel("Your message").press("Enter");
   await expect(page.getByText("Hi, I'm the intake assistant.")).toBeVisible();
@@ -151,4 +159,18 @@ test("a new conversation starts fresh", async ({ page }) => {
 
   await expect(page.getByText("Hi, I'm the intake assistant.")).toHaveCount(1);
   expect(requests[1].contextId).toBeUndefined();
+});
+
+test("a usage limit is shown as a readable message and the chat stays usable", async ({ page }) => {
+  const LIMIT = "You have reached the message limit for now. Please try again in 14 minutes.";
+  await mockChat(page, () => [{ type: "reply", text: LIMIT, data: null, contextId: "ctx-1", state: "rejected" }]);
+
+  await openChat(page);
+  const box = page.getByRole("textbox");
+  await box.fill("my knee hurts");
+  await box.press("Enter");
+
+  await expect(page.getByText(LIMIT)).toBeVisible();
+  await expect(page.locator('[data-kind="error"]')).toHaveCount(1);
+  await expect(box).toBeEnabled();
 });

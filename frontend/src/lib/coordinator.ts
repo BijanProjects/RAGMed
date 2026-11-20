@@ -59,6 +59,7 @@ export async function* askCoordinator(
   message: string,
   contextId?: string,
   action?: ChatAction,
+  clientIp?: string,
 ): AsyncGenerator<ChatEvent> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -66,6 +67,8 @@ export async function* askCoordinator(
     "A2A-Version": "1.0",
   };
   if (COORDINATOR_TOKEN) headers.Authorization = `Bearer ${COORDINATOR_TOKEN}`;
+  // The Coordinator's rate limits are per visitor; it trusts this header only from this app.
+  if (clientIp) headers["X-RAGMed-Client-IP"] = clientIp;
 
   const request = {
     jsonrpc: "2.0",

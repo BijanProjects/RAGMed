@@ -1,7 +1,12 @@
 import { askCoordinator } from "@/lib/coordinator";
+import { SESSION_COOKIE, isValidSession, issueSession, readCookie, sessionCookie } from "@/lib/session";
+import { clientIp, verifyTurnstile } from "@/lib/turnstile";
 import type { ChatAction, ChatEvent } from "@/lib/types";
 
 const MAX_MESSAGE_CHARS = 2000;
+// The bot check is on when a Turnstile secret is configured (always in production).
+const TURNSTILE_SECRET = process.env.TURNSTILE_SECRET_KEY;
+const SESSION_SECRET = process.env.SESSION_SECRET;
 const EMAIL = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?([+-]\d{2}:\d{2}|Z)$/;
 
@@ -26,7 +31,7 @@ function parseAction(value: unknown): ChatAction | undefined | null {
  * The browser only ever talks to this route; the backend stays private.
  */
 export async function POST(request: Request): Promise<Response> {
-  let body: { message?: unknown; contextId?: unknown; action?: unknown };
+  let body: { message?: unknown; contextId?: unknown; action?: unknown; turnstileToken?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -45,13 +50,32 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const ip = clientIp(request.headers);
+  let setCookie: string | undefined;
+  if (TURNSTILE_SECRET) {
+    if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
+      return Response.json({ error: "The chat is not configured." }, { status: 500 });
+    }
+    const verified = isValidSession(readCookie(request.headers.get("cookie"), SESSION_COOKIE), SESSION_SECRET);
+    if (!verified) {
+      const token = typeof body.turnstileToken === "string" ? body.turnstileToken : "";
+      if (!token || !(await verifyTurnstile(token, TURNSTILE_SECRET, ip))) {
+        return Response.json(
+          { error: "Please complete the quick check, then send again.", code: "verification_required" },
+          { status: 403 },
+        );
+      }
+      setCookie = sessionCookie(issueSession(SESSION_SECRET));
+    }
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (event: ChatEvent) =>
         controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
       try {
-        for await (const event of askCoordinator(message, contextId, action)) send(event);
+        for await (const event of askCoordinator(message, contextId, action, ip)) send(event);
       } catch {
         send({ type: "error", text: "Something went wrong. Please try again." });
       } finally {
@@ -60,11 +84,11 @@ export async function POST(request: Request): Promise<Response> {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-    },
+  const headers = new Headers({
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
   });
+  if (setCookie) headers.set("Set-Cookie", setCookie);
+  return new Response(stream, { headers });
 }

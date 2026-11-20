@@ -1,13 +1,48 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import Script from "next/script";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import type { Appointment, ChatAction, ChatEvent, Offer, ReplyData, Slot } from "@/lib/types";
 
 const CLINIC_TIME_ZONE = process.env.NEXT_PUBLIC_CLINIC_TIME_ZONE ?? "America/St_Johns";
 const EMAIL = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$/;
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+const CHECK_ENABLED = Boolean(TURNSTILE_SITE_KEY);
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (element: HTMLElement, options: Record<string, unknown>) => string;
+      reset: (widget?: string) => void;
+    };
+  }
+}
+
+/** Cloudflare's bot check, shown only when Cloudflare wants an interaction. */
+function useTurnstile() {
+  const container = useRef<HTMLDivElement>(null);
+  const widget = useRef<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const render = useCallback(() => {
+    if (!TURNSTILE_SITE_KEY || !window.turnstile || !container.current || widget.current) return;
+    widget.current = window.turnstile.render(container.current, {
+      sitekey: TURNSTILE_SITE_KEY,
+      appearance: "interaction-only",
+      callback: (value: string) => setToken(value),
+      "expired-callback": () => setToken(null),
+      "error-callback": () => setToken(null),
+    });
+  }, []);
+  const reset = useCallback(() => {
+    setToken(null);
+    if (widget.current) window.turnstile?.reset(widget.current);
+  }, []);
+  useEffect(render, [render]);
+  return [container, token, render, reset] as const;
+}
 
 interface Message {
   id: string;
@@ -75,6 +110,9 @@ export function Chat() {
   const [contextId, setContextId] = useState<string | undefined>();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [checkBox, checkToken, renderCheck, resetCheck] = useTurnstile();
+  const waitingForCheck = CHECK_ENABLED && !verified && !checkToken;
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -86,7 +124,8 @@ export function Chat() {
 
   async function send({ text = "", action, label }: Outgoing) {
     const message = text.trim();
-    if ((!message && !action) || busy) return;
+    if ((!message && !action) || busy || waitingForCheck) return;
+    const turnstileToken = CHECK_ENABLED && !verified ? checkToken : undefined;
     setInput("");
     setBusy(true);
     const replyId = crypto.randomUUID();
@@ -100,12 +139,15 @@ export function Chat() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, contextId, action }),
+        body: JSON.stringify({ message, contextId, action, turnstileToken }),
       });
+      if (turnstileToken) resetCheck(); // each token works once
       if (!response.ok || !response.body) {
         const error = await response.json().catch(() => ({ error: "Request failed." }));
+        if (error.code === "verification_required") setVerified(false);
         throw new Error(error.error ?? "Request failed.");
       }
+      if (CHECK_ENABLED) setVerified(true); // the server set a session cookie
       for await (const event of readEvents(response)) {
         if (event.type === "progress") {
           update(replyId, (m) => ({ ...m, progress: [...m.progress, event.text] }));
@@ -138,7 +180,17 @@ export function Chat() {
   const latest = messages.at(-1)?.id;
 
   return (
-    <div className="mx-auto flex h-dvh w-full max-w-3xl flex-col px-4">
+    <div
+      className="mx-auto flex h-dvh w-full max-w-3xl flex-col px-4"
+      data-check={waitingForCheck ? "pending" : "ready"}
+    >
+      {CHECK_ENABLED && (
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+          strategy="afterInteractive"
+          onReady={renderCheck}
+        />
+      )}
       <header className="flex items-center justify-between gap-4 border-b border-black/10 py-4 dark:border-white/10">
         <div>
           <h1 className="text-lg font-semibold">RAGMed Clinic</h1>
@@ -165,6 +217,7 @@ export function Chat() {
               {EXAMPLES.map((example) => (
                 <button
                   key={example}
+                  disabled={waitingForCheck}
                   onClick={() => send({ text: example })}
                   className="rounded-xl border border-black/10 p-3 text-left text-sm hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
                 >
@@ -186,6 +239,7 @@ export function Chat() {
         <div ref={endRef} />
       </main>
 
+      <div ref={checkBox} className="flex justify-center empty:hidden" />
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -213,7 +267,8 @@ export function Chat() {
         />
         <button
           type="submit"
-          disabled={busy || !input.trim()}
+          disabled={busy || !input.trim() || waitingForCheck}
+          title={waitingForCheck ? "Running a quick security check…" : undefined}
           className="rounded-xl bg-sky-600 px-5 font-medium text-white hover:bg-sky-700 disabled:opacity-40"
         >
           Send

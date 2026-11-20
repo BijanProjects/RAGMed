@@ -76,3 +76,11 @@ def test_chunk_pairs_keeps_parent_metadata() -> None:
     treatment = [c for c in chunks if c.parent_id == "bbb"]
     assert [c.index for c in treatment] == list(range(len(treatment)))
     assert all(c.question == "How is it treated?" and c.qtype == "treatment" for c in treatment)
+
+
+def test_overlap_never_pushes_a_chunk_over_budget() -> None:
+    text = " ".join([_sentence(0, words=8), _sentence(1, words=8), _sentence(2, words=28)])
+
+    chunks = chunk_text(text, max_words=30, overlap_words=10)
+
+    assert all(len(c.split()) <= 30 for c in chunks)

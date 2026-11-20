@@ -76,6 +76,9 @@ def chunk_text(
             chunks.append(" ".join(current))
             current = _overlap_tail(current, overlap_words)
             current_words = sum(_word_count(s) for s in current)
+            if current_words + words > max_words:
+                # The carried-over context does not fit next to this piece; drop it.
+                current, current_words = [], 0
         current.append(piece)
         current_words += words
     if current:

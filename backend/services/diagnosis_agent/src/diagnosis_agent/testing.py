@@ -36,7 +36,9 @@ class FakeReasoner:
             possible_conditions=["asthma"],
             urgency="routine",
             recommend_visit=True,
-            specialty="pulmonology",
+            clinician_type="Pulmonology",
+            visit_minutes=30,
+            visit_reason="Breathing problems need a specialist assessment.",
         )
     )
     unsupported: list[str] = field(default_factory=list)

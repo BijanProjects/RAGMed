@@ -70,9 +70,16 @@ async def test_no_results_skip_the_model() -> None:
 
 def draft(**changes: object) -> DiagnosisAnswer:
     base = DiagnosisAnswer(
-        answerable=True, answer="Inhalers help [2].", citations=[2], possible_conditions=[],
-        urgency="routine", recommend_visit=False, specialty=None,
-    )  # fmt: skip
+        answerable=True,
+        answer="Inhalers help [2].",
+        citations=[2],
+        possible_conditions=[],
+        urgency="routine",
+        recommend_visit=False,
+        clinician_type="General physician",
+        visit_minutes=15,
+        visit_reason="r",
+    )
     return base.model_copy(update=changes)
 
 
@@ -111,9 +118,14 @@ async def test_the_check_removes_only_flagged_sentences_and_keeps_triage() -> No
     answer = DiagnosisAnswer(
         answerable=True,
         answer="Inhalers help [2]. Asthma is caused by aliens. Please see a doctor.",
-        citations=[2], possible_conditions=["asthma"],
-        urgency="urgent", recommend_visit=True, specialty="pulmonology",
-    )  # fmt: skip
+        citations=[2],
+        possible_conditions=["asthma"],
+        urgency="urgent",
+        recommend_visit=True,
+        clinician_type="Pulmonology",
+        visit_minutes=30,
+        visit_reason="r",
+    )
     reasoner = FakeReasoner(
         answerable=[True], answer_given=answer, unsupported=["asthma is caused by ALIENS"]
     )
@@ -127,9 +139,16 @@ async def test_the_check_removes_only_flagged_sentences_and_keeps_triage() -> No
 
 async def test_a_check_that_removes_everything_still_advises_a_clinician() -> None:
     answer = DiagnosisAnswer(
-        answerable=True, answer="Something unsupported.", citations=[1], possible_conditions=["x"],
-        urgency="self_care", recommend_visit=False, specialty=None,
-    )  # fmt: skip
+        answerable=True,
+        answer="Something unsupported.",
+        citations=[1],
+        possible_conditions=["x"],
+        urgency="self_care",
+        recommend_visit=False,
+        clinician_type="General physician",
+        visit_minutes=15,
+        visit_reason="r",
+    )
     reasoner = FakeReasoner(
         answerable=[True], answer_given=answer, unsupported=["Something unsupported."]
     )
@@ -153,9 +172,16 @@ def test_remove_sentences_ignores_empty_flags() -> None:
 
 async def test_unanswerable_keeps_an_urgency_the_model_already_saw() -> None:
     urgent = DiagnosisAnswer(
-        answerable=False, answer="", citations=[], possible_conditions=[],
-        urgency="emergency", recommend_visit=True, specialty=None,
-    )  # fmt: skip
+        answerable=False,
+        answer="",
+        citations=[],
+        possible_conditions=[],
+        urgency="emergency",
+        recommend_visit=True,
+        clinician_type="General physician",
+        visit_minutes=15,
+        visit_reason="r",
+    )
     reasoner = FakeReasoner(answerable=[False] * MAX_SEARCHES, answer_given=urgent)
 
     result = await run(FakeKnowledge([PASSAGES]), reasoner)
@@ -169,3 +195,16 @@ def test_only_cited_passages_can_be_selected() -> None:
 
     assert text.startswith("[2] (treatment)")
     assert "[1]" not in text
+
+
+def test_without_evidence_a_general_physician_sees_them_for_longer() -> None:
+    result = insufficient_result("q")
+
+    assert result.clinician_type == "General physician"
+    assert result.visit_minutes == 30
+
+
+def test_triage_fields_pass_through() -> None:
+    result = finalise(draft(clinician_type="Neurology", visit_minutes=30), PASSAGES, "q")
+
+    assert (result.clinician_type, result.visit_minutes) == ("Neurology", 30)

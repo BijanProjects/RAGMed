@@ -6,32 +6,13 @@ All names are fictional.
 import hashlib
 from typing import Literal
 
-GENERAL = "General physician"
+from ragmed_core.clinic import CLINICIAN_TYPES, GENERAL_PHYSICIAN
 
-CLINICIAN_TYPES: tuple[str, ...] = (
-    GENERAL,
-    "Allergy and immunology",
-    "Cardiology",
-    "Dermatology",
-    "Endocrinology",
-    "Gastroenterology",
-    "Hematology",
-    "Infectious disease",
-    "Nephrology",
-    "Neurology",
-    "Obstetrics and gynecology",
-    "Oncology",
-    "Ophthalmology",
-    "Orthopedics",
-    "Otolaryngology (ENT)",
-    "Pediatrics",
-    "Psychiatry",
-    "Pulmonology",
-    "Rheumatology",
-    "Urology",
-)
+GENERAL = GENERAL_PHYSICIAN
 
 VisitMinutes = Literal[15, 30]
+
+__all__ = ["CLINICIAN_TYPES", "GENERAL", "ROSTER", "VisitMinutes", "normalise", "physician_for"]
 
 ROSTER: dict[str, tuple[str, ...]] = {
     GENERAL: ("Dr. Amara Okafor", "Dr. Liam Fournier", "Dr. Priya Raman", "Dr. Sofia Lindqvist"),

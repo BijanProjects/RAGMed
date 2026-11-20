@@ -3,7 +3,7 @@
 from typing import Any, cast
 
 import structlog
-from a2a.helpers import new_data_part, new_text_part
+from a2a.helpers import get_data_parts, new_data_part, new_text_part
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.types import TaskState
@@ -24,6 +24,20 @@ FAILED = "Something went wrong on our side. Please try again."
 ROUTING = "Reading your message"
 
 
+ACTIONS = {"show_slots", "book"}
+
+
+def read_action(context: RequestContext) -> dict[str, Any] | None:
+    """A button press from the web app, sent as a data part: {"action": {"type": ...}}."""
+    if context.message is None:
+        return None
+    for data in get_data_parts(context.message.parts):
+        action = data.get("action") if isinstance(data, dict) else None
+        if isinstance(action, dict) and action.get("type") in ACTIONS:
+            return {k: v for k, v in action.items() if k in ("type", "start", "clinician_type")}
+    return None
+
+
 class CoordinatorExecutor(AgentExecutor):
     def __init__(self, graph: CompiledStateGraph[Any]) -> None:
         self._graph = graph
@@ -31,7 +45,8 @@ class CoordinatorExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         updater = await start_task(context, event_queue)
         message = context.get_user_input().strip()
-        if not message or len(message) > MAX_MESSAGE_CHARS:
+        action = read_action(context)
+        if (not message and action is None) or len(message) > MAX_MESSAGE_CHARS:
             reason = f"Please send a message of 1 to {MAX_MESSAGE_CHARS:,} characters."
             await updater.reject(updater.new_agent_message([new_text_part(reason)]))
             return
@@ -41,9 +56,8 @@ class CoordinatorExecutor(AgentExecutor):
         config: RunnableConfig = {"configurable": {"thread_id": str(context.context_id)}}
         reply: dict[str, Any] | None = None
         try:
-            async for event in self._graph.astream(
-                {"message": message}, config, stream_mode=["custom", "updates"]
-            ):
+            turn = {"message": message, "action": action, "session": str(context.context_id)}
+            async for event in self._graph.astream(turn, config, stream_mode=["custom", "updates"]):
                 # With several stream modes, each event is a (mode, payload) pair.
                 mode, data = cast(tuple[str, dict[str, Any]], event)
                 if mode == "custom" and "progress" in data:

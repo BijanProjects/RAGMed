@@ -9,6 +9,7 @@ EMERGENCIES = [
     ("I think I'm having a heart attack", "chest_pain"),
     ("my dad's face is drooping and his speech is slurred", "stroke"),
     ("sudden numbness on one side of my body", "stroke"),
+    ("I think my dad is having a stroke", "stroke"),
     ("I can't breathe properly", "breathing"),
     ("my baby has blue lips", "breathing"),
     ("my throat is swelling after eating peanuts", "anaphylaxis"),
@@ -36,6 +37,8 @@ ROUTINE = [
     "My knee hurts when I run",
     "What causes migraines?",
     "hello",
+    "I'm worried because my mother had a stroke",  # family history, not an emergency now
+    "my grandfather had a heart condition",
 ]
 
 

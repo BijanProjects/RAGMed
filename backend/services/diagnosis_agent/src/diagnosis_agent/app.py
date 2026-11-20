@@ -48,7 +48,7 @@ CARD = CardSpec(
             id="medical_triage_answer",
             name="Medical triage answer",
             description="A cited answer plus structured triage (urgency, recommend_visit, "
-            "specialty) as a JSON data part.",
+            "clinician type and visit length) as a JSON data part.",
             tags=["medical", "rag", "triage"],
             examples=["What are the symptoms of asthma?", "I have had a rash and fever"],
         )

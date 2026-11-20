@@ -6,7 +6,13 @@ from typing import Any
 
 import httpx
 from a2a.client import ClientConfig, create_client
-from a2a.helpers import get_data_parts, get_text_parts, new_text_message
+from a2a.helpers import (
+    get_data_parts,
+    get_text_parts,
+    new_data_message,
+    new_data_part,
+    new_text_message,
+)
 from a2a.types import Role, SendMessageRequest, StreamResponse, TaskState
 
 from ragmed_core.tracing import current_trace
@@ -69,11 +75,18 @@ class RemoteAgent:
         )
 
     async def stream(
-        self, text: str, *, context_id: str | None = None
+        self, text: str, *, context_id: str | None = None, data: dict[str, Any] | None = None
     ) -> AsyncIterator[AgentEvent]:
-        """Send `text`; yield progress updates, then exactly one `Reply`."""
+        """Send `text` (and optional structured `data`); yield progress, then one `Reply`."""
         client = await create_client(self._url, ClientConfig(httpx_client=self._http))
-        message = new_text_message(text, context_id=context_id, role=Role.ROLE_USER)
+        if text:
+            message = new_text_message(text, context_id=context_id, role=Role.ROLE_USER)
+            if data is not None:
+                message.parts.append(new_data_part(data))
+        elif data is not None:  # A2A refuses empty text parts, so send the data alone
+            message = new_data_message(data, context_id=context_id, role=Role.ROLE_USER)
+        else:
+            raise ValueError("send text, data or both")
         reply_text: list[str] = []
         reply_data: list[dict[str, Any]] = []
         context, task_id, state = context_id or "", "", "failed"

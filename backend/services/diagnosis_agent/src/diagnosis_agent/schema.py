@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ragmed_core.clinic import ClinicianType, VisitMinutes
+
 Urgency = Literal["self_care", "routine", "urgent", "emergency"]
 
 
@@ -45,9 +47,17 @@ class DiagnosisAnswer(BaseModel):
         "or emergency (call emergency services now)."
     )
     recommend_visit: bool = Field(description="True if the person should see a clinician.")
-    specialty: str | None = Field(
-        default=None, description="The kind of clinician to see, if a visit is recommended."
+    clinician_type: ClinicianType = Field(
+        description="Who should see them at RAGMed Clinic. Prefer 'General physician' for "
+        "common or unclear problems, prescriptions, renewals and notes; choose a specialty only "
+        "when the problem clearly belongs to one (e.g. Neurology for recurring migraines with "
+        "aura, Pediatrics for a young child)."
     )
+    visit_minutes: VisitMinutes = Field(
+        description="15 for a straightforward problem, a note or a prescription; 30 for a "
+        "complex, severe, long-standing or multi-symptom problem."
+    )
+    visit_reason: str = Field(description="One sentence: why this clinician and visit length.")
 
 
 class Citation(BaseModel):
@@ -64,6 +74,8 @@ class DiagnosisResult(BaseModel):
     possible_conditions: list[str]
     urgency: Urgency
     recommend_visit: bool
-    specialty: str | None
+    clinician_type: ClinicianType
+    visit_minutes: VisitMinutes
+    visit_reason: str
     sufficient_evidence: bool
     search_query: str

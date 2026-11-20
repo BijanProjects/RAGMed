@@ -8,18 +8,21 @@ from pydantic import BaseModel, Field
 
 from ragmed_llm import ask_structured
 
-Intent = Literal["medical_question", "book_appointment", "greeting", "out_of_scope"]
+Intent = Literal["symptoms", "medical_question", "book_appointment", "greeting", "out_of_scope"]
 
-ROUTE = """You route messages for a medical information assistant. Decide what the person wants:
+ROUTE = """You route messages for RAGMed Clinic's intake assistant. Decide what the person wants:
 
-- medical_question: symptoms, conditions, treatments, tests, prevention, or any health concern.
-- book_appointment: they want to book, change or cancel a visit with a clinician.
+- symptoms: they describe a health problem, symptom or concern of their own or of someone they
+  care for (for example "I've had a cough for a week", "my son has a rash"), or need a
+  prescription renewal or a note.
+- medical_question: a general health question, not about their own situation (for example
+  "What causes asthma?").
+- book_appointment: they want to book a visit but have not said what for.
 - greeting: hello, thanks, or asking what you can do.
 - out_of_scope: anything else (weather, coding, general knowledge).
 
-For a medical question, also write `question`: the person's question rewritten to stand on its
-own, using the conversation so far (for example "what about children?" after a question about
-asthma becomes "How is asthma treated in children?"). Keep their symptoms and details."""
+For medical_question, also write `question`: their question rewritten to stand on its own using
+the conversation so far. Otherwise leave `question` empty."""
 
 
 class Route(BaseModel):

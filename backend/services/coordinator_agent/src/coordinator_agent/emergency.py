@@ -40,7 +40,9 @@ _RULES: list[tuple[str, str, list[str]]] = [
     ("stroke", EMERGENCY_GUIDANCE, [
         r"\b(face|mouth) (is )?(drooping|droops?)\b", r"\bslurr(ed|ing) (speech|words)\b",
         r"\b(can'?t|cannot|unable to) (speak|talk|move (my|one) (arm|leg|side))\b",
-        r"\b(numb|weak)(ness)? (on|in) (one|the (left|right)) side\b", r"\bstroke\b",
+        r"\b(numb|weak)(ness)? (on|in) (one|the (left|right)) side\b",
+        # Someone having a stroke now; "my mother had a stroke" is family history, not a flag.
+        r"\b(having|has|is having|'s having) a stroke\b", r"\bstroke symptoms\b",
     ]),
     ("breathing", EMERGENCY_GUIDANCE, [
         r"\b(can'?t|cannot|unable to|struggling to|hard to) breathe?\b", r"\bnot breathing\b",

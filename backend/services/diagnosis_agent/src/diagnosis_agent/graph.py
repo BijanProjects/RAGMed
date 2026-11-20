@@ -23,9 +23,11 @@ from diagnosis_agent.schema import (
     Passage,
     Urgency,
 )
+from ragmed_core.clinic import GENERAL_PHYSICIAN
 
 TOP_K = 5
 MAX_SEARCHES = 2
+NO_EVIDENCE_REASON = "No matching sources were found, so a full assessment is needed."
 INSUFFICIENT = (
     "I do not have enough information in my medical sources to answer this. Please consult "
     "a medical professional, who can look at your situation directly."
@@ -76,7 +78,9 @@ def remove_sentences(text: str, unsupported: list[str]) -> str:
     return " ".join(kept).strip()
 
 
-def insufficient_result(query: str, urgency: Urgency = "routine") -> DiagnosisResult:
+def insufficient_result(
+    query: str, urgency: Urgency = "routine", draft: DiagnosisAnswer | None = None
+) -> DiagnosisResult:
     """No usable answer: always advise a clinician, and never lower an urgency already found."""
     floor = max(urgency, "routine", key=_URGENCY_ORDER.index)
     return DiagnosisResult(
@@ -85,7 +89,10 @@ def insufficient_result(query: str, urgency: Urgency = "routine") -> DiagnosisRe
         possible_conditions=[],
         urgency=floor,
         recommend_visit=True,
-        specialty=None,
+        # Without evidence, a general physician sees them first, with time to assess.
+        clinician_type=draft.clinician_type if draft else GENERAL_PHYSICIAN,
+        visit_minutes=draft.visit_minutes if draft else 30,
+        visit_reason=draft.visit_reason if draft else NO_EVIDENCE_REASON,
         sufficient_evidence=False,
         search_query=query,
     )
@@ -95,7 +102,7 @@ def finalise(draft: DiagnosisAnswer, passages: list[Passage], query: str) -> Dia
     """Apply the rules that must hold whatever the model returned."""
     answer = remove_doses(draft.answer)
     if not answer:
-        return insufficient_result(query, draft.urgency)
+        return insufficient_result(query, draft.urgency, draft)
     numbers = sorted({n for n in draft.citations if 1 <= n <= len(passages)})
     return DiagnosisResult(
         answer=answer,
@@ -108,7 +115,9 @@ def finalise(draft: DiagnosisAnswer, passages: list[Passage], query: str) -> Dia
         possible_conditions=draft.possible_conditions,
         urgency=draft.urgency,
         recommend_visit=draft.recommend_visit or draft.urgency in ("urgent", "emergency"),
-        specialty=draft.specialty,
+        clinician_type=draft.clinician_type,
+        visit_minutes=draft.visit_minutes,
+        visit_reason=draft.visit_reason,
         sufficient_evidence=True,
         search_query=query,
     )
@@ -151,9 +160,8 @@ def build_graph(knowledge: Knowledge, reasoner: Reasoner) -> CompiledStateGraph[
 
     async def insufficient(state: State) -> State:
         draft = state.get("draft")
-        return {
-            "result": insufficient_result(state["query"], draft.urgency if draft else "routine")
-        }
+        urgency = draft.urgency if draft else "routine"
+        return {"result": insufficient_result(state["query"], urgency, draft)}
 
     graph = StateGraph(State)
     graph.add_node("rewrite", rewrite)

@@ -13,7 +13,7 @@ from mcp_scheduling.providers import (
     ProviderError,
     discover_event_types,
 )
-from mcp_scheduling.roster import GENERAL, ROSTER, normalise, physician_for
+from mcp_scheduling.roster import CLINICIAN_TYPES, GENERAL, ROSTER, normalise, physician_for
 
 pytestmark = pytest.mark.anyio
 ZONE = ZoneInfo("America/St_Johns")
@@ -26,6 +26,11 @@ def test_clinician_types_are_matched_loosely() -> None:
     assert normalise("neuro") == "Neurology"
     with pytest.raises(ValueError, match="list_clinician_types"):
         normalise("astrologer")
+
+
+def test_every_clinician_type_has_physicians() -> None:
+    assert set(ROSTER) == set(CLINICIAN_TYPES)
+    assert all(ROSTER[kind] for kind in CLINICIAN_TYPES)
 
 
 def test_physician_choice_is_stable_and_on_the_team() -> None:

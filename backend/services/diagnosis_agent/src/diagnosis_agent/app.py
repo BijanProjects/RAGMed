@@ -30,6 +30,8 @@ class DiagnosisSettings(CoreSettings):
     small_models: tuple[str, ...] = ("openai/gpt-oss-20b", "qwen/qwen3.8-27b")
     small_reasoning: str = "low"
     large_reasoning: str = "medium"
+    # Used only when every Groq model is busy; needs GOOGLE_API_KEY (see ragmed_llm.gemini).
+    backup_models: tuple[str, ...] = ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
     mcp_url: str = "http://127.0.0.1:9001/mcp"
     mcp_token: SecretStr | None = None
     # Callers allowed to use this agent: JSON object of name to token.
@@ -57,11 +59,13 @@ CARD = CardSpec(
 
 
 def _groq_reasoner(settings: DiagnosisSettings) -> Reasoner:  # pragma: no cover - needs a key
+    from ragmed_llm.gemini import gemini_models  # noqa: PLC0415
     from ragmed_llm.groq import groq_models  # noqa: PLC0415
 
+    backup = gemini_models(settings.backup_models)
     return LlmReasoner(
-        small=groq_models(settings.small_models, settings.small_reasoning),
-        large=groq_models(settings.large_models, settings.large_reasoning),
+        small=[*groq_models(settings.small_models, settings.small_reasoning), *backup],
+        large=[*groq_models(settings.large_models, settings.large_reasoning), *backup],
     )
 
 

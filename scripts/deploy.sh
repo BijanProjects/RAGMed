@@ -40,7 +40,7 @@ if [[ ! -f $ENV_FILE ]]; then
   echo "  created .env.production with new secrets"
 fi
 # API keys always follow .env, so a rotated key only needs a redeploy.
-for name in GROQ_API_KEY CAL_API_KEY RAGMED_SMTP_USERNAME RAGMED_SMTP_PASSWORD \
+for name in GROQ_API_KEY GOOGLE_API_KEY CAL_API_KEY RAGMED_SMTP_USERNAME RAGMED_SMTP_PASSWORD \
   NEXT_PUBLIC_TURNSTILE_SITE_KEY TURNSTILE_SECRET_KEY; do
   value="$(from_env "$name")"
   [[ -n $value ]] || { echo "✗ $name is missing from .env"; exit 1; }

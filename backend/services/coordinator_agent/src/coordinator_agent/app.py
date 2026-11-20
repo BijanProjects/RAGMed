@@ -3,6 +3,7 @@
 import dataclasses
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import Field, SecretStr
@@ -37,6 +38,8 @@ class CoordinatorSettings(CoreSettings):
     scheduling_token: SecretStr | None = None
     small_models: tuple[str, ...] = ("openai/gpt-oss-20b", "qwen/qwen3.8-27b")
     small_reasoning: str = "low"
+    # Used only when every Groq model is busy; needs GOOGLE_API_KEY (see ragmed_llm.gemini).
+    backup_models: tuple[str, ...] = ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
     # Shared rate-limit counters; without it, counters live in this process's memory.
     valkey_url: str | None = None
     # Saved conversations; without it, they live in memory and are lost on restart.
@@ -73,16 +76,23 @@ CARD = CardSpec(
 )
 
 
-def _llm_router(settings: CoordinatorSettings) -> Router:  # pragma: no cover - needs a key
+def _models(settings: CoordinatorSettings) -> list[BaseChatModel]:  # pragma: no cover - needs a key
+    """The Groq models in fallback order, then the Gemini backup."""
+    from ragmed_llm.gemini import gemini_models  # noqa: PLC0415
     from ragmed_llm.groq import groq_models  # noqa: PLC0415
 
-    return LlmRouter(groq_models(settings.small_models, settings.small_reasoning))
+    return [
+        *groq_models(settings.small_models, settings.small_reasoning),
+        *gemini_models(settings.backup_models),
+    ]
+
+
+def _llm_router(settings: CoordinatorSettings) -> Router:  # pragma: no cover - needs a key
+    return LlmRouter(_models(settings))
 
 
 def _llm_interviewer(settings: CoordinatorSettings) -> Interviewer:  # pragma: no cover
-    from ragmed_llm.groq import groq_models  # noqa: PLC0415
-
-    return LlmInterviewer(groq_models(settings.small_models, settings.small_reasoning))
+    return LlmInterviewer(_models(settings))
 
 
 def make_mailer(settings: CoordinatorSettings) -> Mailer:

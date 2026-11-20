@@ -83,6 +83,7 @@ services:
       RAGMED_MCP_TOKEN: ${TOKEN_MEDICAL:?}
       RAGMED_SERVICE_TOKENS: '{"coordinator-agent": "${TOKEN_DIAGNOSIS:?}"}'
       GROQ_API_KEY: ${GROQ_API_KEY:?}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:?}
     depends_on:
       mcp-medical: { condition: service_healthy }
     healthcheck:
@@ -106,6 +107,7 @@ services:
       RAGMED_SMTP_USERNAME: ${RAGMED_SMTP_USERNAME:?}
       RAGMED_SMTP_PASSWORD: ${RAGMED_SMTP_PASSWORD:?}
       GROQ_API_KEY: ${GROQ_API_KEY:?}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:?}
     depends_on:
       postgres: { condition: service_healthy }
       valkey: { condition: service_healthy }

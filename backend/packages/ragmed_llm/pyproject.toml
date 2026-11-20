@@ -1,0 +1,19 @@
+[project]
+name = "ragmed-llm"
+version = "0.1.0"
+description = "Typed language-model calls with fallbacks and free-tier rate-limit handling."
+requires-python = ">=3.12"
+dependencies = [
+  "anyio>=4",
+  "langchain-core>=1.8,<2",
+  "langchain-groq>=1.2,<2",
+  "pydantic>=2.9,<3",
+  "ragmed-core",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ragmed_llm"]

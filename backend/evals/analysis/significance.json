@@ -1,0 +1,381 @@
+{
+  "ndcg_at_10": {
+    "minilm dense": 0.6245,
+    "minilm hybrid": 0.6216,
+    "qwen3-0.6b dense": 0.748,
+    "qwen3-0.6b hybrid": 0.6539,
+    "bge-m3 dense": 0.7505,
+    "bge-m3 hybrid": 0.6778,
+    "medcpt dense": 0.4682,
+    "medcpt hybrid": 0.545,
+    "bge-m3 onnx-int8": 0.7564,
+    "bge-m3 + minilm-ce top40": 0.7653,
+    "bge-m3 + minilm-ce top20": 0.7663,
+    "bge-m3 + bge-reranker-base": 0.5913,
+    "bge-m3 + bge-reranker-v2-m3": 0.8028,
+    "bm25 only": 0.5216
+  },
+  "paired_bootstrap": {
+    "bge-m3 dense vs qwen3-0.6b dense": {
+      "gap": 0.0025,
+      "ci95": [
+        -0.0127,
+        0.018
+      ],
+      "real": false
+    },
+    "bge-m3 dense vs minilm dense": {
+      "gap": 0.126,
+      "ci95": [
+        0.1063,
+        0.1461
+      ],
+      "real": true
+    },
+    "qwen3-0.6b dense vs minilm dense": {
+      "gap": 0.1235,
+      "ci95": [
+        0.1049,
+        0.1422
+      ],
+      "real": true
+    },
+    "minilm dense vs medcpt dense": {
+      "gap": 0.1563,
+      "ci95": [
+        0.133,
+        0.1792
+      ],
+      "real": true
+    },
+    "bge-m3 hybrid vs bge-m3 dense": {
+      "gap": -0.0727,
+      "ci95": [
+        -0.0885,
+        -0.0568
+      ],
+      "real": true
+    },
+    "qwen3-0.6b hybrid vs qwen3-0.6b dense": {
+      "gap": -0.0941,
+      "ci95": [
+        -0.1081,
+        -0.0799
+      ],
+      "real": true
+    },
+    "minilm hybrid vs minilm dense": {
+      "gap": -0.0029,
+      "ci95": [
+        -0.0178,
+        0.0123
+      ],
+      "real": false
+    },
+    "medcpt hybrid vs medcpt dense": {
+      "gap": 0.0768,
+      "ci95": [
+        0.0609,
+        0.0928
+      ],
+      "real": true
+    },
+    "bge-m3 onnx-int8 vs bge-m3 dense": {
+      "gap": 0.0058,
+      "ci95": [
+        0.0012,
+        0.0107
+      ],
+      "real": true
+    },
+    "bge-m3 + minilm-ce top40 vs bge-m3 dense": {
+      "gap": 0.0148,
+      "ci95": [
+        0.0005,
+        0.0292
+      ],
+      "real": true
+    },
+    "bge-m3 + minilm-ce top20 vs bge-m3 dense": {
+      "gap": 0.0157,
+      "ci95": [
+        0.0015,
+        0.0301
+      ],
+      "real": true
+    },
+    "bge-m3 + bge-reranker-base vs bge-m3 dense": {
+      "gap": -0.1592,
+      "ci95": [
+        -0.179,
+        -0.1395
+      ],
+      "real": true
+    },
+    "bge-m3 + bge-reranker-v2-m3 vs bge-m3 dense": {
+      "gap": 0.0523,
+      "ci95": [
+        0.0396,
+        0.0649
+      ],
+      "real": true
+    }
+  },
+  "by_question_type": {
+    "information": {
+      "n": 260,
+      "minilm dense": 0.7,
+      "minilm hybrid": 0.683,
+      "qwen3-0.6b dense": 0.756,
+      "qwen3-0.6b hybrid": 0.692,
+      "bge-m3 dense": 0.863,
+      "bge-m3 hybrid": 0.76,
+      "medcpt dense": 0.479,
+      "medcpt hybrid": 0.579,
+      "bge-m3 onnx-int8": 0.863,
+      "bge-m3 + minilm-ce top40": 0.879,
+      "bge-m3 + minilm-ce top20": 0.879,
+      "bge-m3 + bge-reranker-base": 0.838,
+      "bge-m3 + bge-reranker-v2-m3": 0.899,
+      "bm25 only": 0.561
+    },
+    "symptoms": {
+      "n": 182,
+      "minilm dense": 0.661,
+      "minilm hybrid": 0.705,
+      "qwen3-0.6b dense": 0.902,
+      "qwen3-0.6b hybrid": 0.769,
+      "bge-m3 dense": 0.911,
+      "bge-m3 hybrid": 0.795,
+      "medcpt dense": 0.292,
+      "medcpt hybrid": 0.493,
+      "bge-m3 onnx-int8": 0.918,
+      "bge-m3 + minilm-ce top40": 0.842,
+      "bge-m3 + minilm-ce top20": 0.842,
+      "bge-m3 + bge-reranker-base": 0.675,
+      "bge-m3 + bge-reranker-v2-m3": 0.929,
+      "bm25 only": 0.624
+    },
+    "treatment": {
+      "n": 178,
+      "minilm dense": 0.71,
+      "minilm hybrid": 0.7,
+      "qwen3-0.6b dense": 0.803,
+      "qwen3-0.6b hybrid": 0.707,
+      "bge-m3 dense": 0.715,
+      "bge-m3 hybrid": 0.681,
+      "medcpt dense": 0.592,
+      "medcpt hybrid": 0.644,
+      "bge-m3 onnx-int8": 0.719,
+      "bge-m3 + minilm-ce top40": 0.779,
+      "bge-m3 + minilm-ce top20": 0.781,
+      "bge-m3 + bge-reranker-base": 0.462,
+      "bge-m3 + bge-reranker-v2-m3": 0.807,
+      "bm25 only": 0.561
+    },
+    "inheritance": {
+      "n": 79,
+      "minilm dense": 0.495,
+      "minilm hybrid": 0.412,
+      "qwen3-0.6b dense": 0.546,
+      "qwen3-0.6b hybrid": 0.433,
+      "bge-m3 dense": 0.476,
+      "bge-m3 hybrid": 0.44,
+      "medcpt dense": 0.391,
+      "medcpt hybrid": 0.371,
+      "bge-m3 onnx-int8": 0.485,
+      "bge-m3 + minilm-ce top40": 0.539,
+      "bge-m3 + minilm-ce top20": 0.539,
+      "bge-m3 + bge-reranker-base": 0.389,
+      "bge-m3 + bge-reranker-v2-m3": 0.493,
+      "bm25 only": 0.318
+    },
+    "genetic changes": {
+      "n": 61,
+      "minilm dense": 0.239,
+      "minilm hybrid": 0.354,
+      "qwen3-0.6b dense": 0.418,
+      "qwen3-0.6b hybrid": 0.44,
+      "bge-m3 dense": 0.529,
+      "bge-m3 hybrid": 0.566,
+      "medcpt dense": 0.472,
+      "medcpt hybrid": 0.521,
+      "bge-m3 onnx-int8": 0.562,
+      "bge-m3 + minilm-ce top40": 0.632,
+      "bge-m3 + minilm-ce top20": 0.633,
+      "bge-m3 + bge-reranker-base": 0.43,
+      "bge-m3 + bge-reranker-v2-m3": 0.636,
+      "bm25 only": 0.423
+    },
+    "frequency": {
+      "n": 58,
+      "minilm dense": 0.732,
+      "minilm hybrid": 0.623,
+      "qwen3-0.6b dense": 0.694,
+      "qwen3-0.6b hybrid": 0.57,
+      "bge-m3 dense": 0.72,
+      "bge-m3 hybrid": 0.632,
+      "medcpt dense": 0.69,
+      "medcpt hybrid": 0.603,
+      "bge-m3 onnx-int8": 0.713,
+      "bge-m3 + minilm-ce top40": 0.641,
+      "bge-m3 + minilm-ce top20": 0.642,
+      "bge-m3 + bge-reranker-base": 0.158,
+      "bge-m3 + bge-reranker-v2-m3": 0.735,
+      "bm25 only": 0.404
+    },
+    "exams and tests": {
+      "n": 44,
+      "minilm dense": 0.533,
+      "minilm hybrid": 0.546,
+      "qwen3-0.6b dense": 0.81,
+      "qwen3-0.6b hybrid": 0.657,
+      "bge-m3 dense": 0.746,
+      "bge-m3 hybrid": 0.652,
+      "medcpt dense": 0.428,
+      "medcpt hybrid": 0.493,
+      "bge-m3 onnx-int8": 0.765,
+      "bge-m3 + minilm-ce top40": 0.805,
+      "bge-m3 + minilm-ce top20": 0.805,
+      "bge-m3 + bge-reranker-base": 0.55,
+      "bge-m3 + bge-reranker-v2-m3": 0.851,
+      "bm25 only": 0.523
+    },
+    "causes": {
+      "n": 40,
+      "minilm dense": 0.732,
+      "minilm hybrid": 0.773,
+      "qwen3-0.6b dense": 0.921,
+      "qwen3-0.6b hybrid": 0.852,
+      "bge-m3 dense": 0.76,
+      "bge-m3 hybrid": 0.786,
+      "medcpt dense": 0.547,
+      "medcpt hybrid": 0.687,
+      "bge-m3 onnx-int8": 0.762,
+      "bge-m3 + minilm-ce top40": 0.868,
+      "bge-m3 + minilm-ce top20": 0.863,
+      "bge-m3 + bge-reranker-base": 0.741,
+      "bge-m3 + bge-reranker-v2-m3": 0.82,
+      "bm25 only": 0.76
+    },
+    "outlook": {
+      "n": 25,
+      "minilm dense": 0.454,
+      "minilm hybrid": 0.407,
+      "qwen3-0.6b dense": 0.516,
+      "qwen3-0.6b hybrid": 0.406,
+      "bge-m3 dense": 0.519,
+      "bge-m3 hybrid": 0.415,
+      "medcpt dense": 0.493,
+      "medcpt hybrid": 0.413,
+      "bge-m3 onnx-int8": 0.524,
+      "bge-m3 + minilm-ce top40": 0.332,
+      "bge-m3 + minilm-ce top20": 0.333,
+      "bge-m3 + bge-reranker-base": 0.385,
+      "bge-m3 + bge-reranker-v2-m3": 0.564,
+      "bm25 only": 0.256
+    },
+    "susceptibility": {
+      "n": 20,
+      "minilm dense": 0.678,
+      "minilm hybrid": 0.642,
+      "qwen3-0.6b dense": 0.787,
+      "qwen3-0.6b hybrid": 0.667,
+      "bge-m3 dense": 0.701,
+      "bge-m3 hybrid": 0.647,
+      "medcpt dense": 0.292,
+      "medcpt hybrid": 0.515,
+      "bge-m3 onnx-int8": 0.715,
+      "bge-m3 + minilm-ce top40": 0.756,
+      "bge-m3 + minilm-ce top20": 0.776,
+      "bge-m3 + bge-reranker-base": 0.597,
+      "bge-m3 + bge-reranker-v2-m3": 0.794,
+      "bm25 only": 0.586
+    },
+    "research": {
+      "n": 19,
+      "minilm dense": 0.461,
+      "minilm hybrid": 0.429,
+      "qwen3-0.6b dense": 0.654,
+      "qwen3-0.6b hybrid": 0.434,
+      "bge-m3 dense": 0.598,
+      "bge-m3 hybrid": 0.363,
+      "medcpt dense": 0.716,
+      "medcpt hybrid": 0.536,
+      "bge-m3 onnx-int8": 0.603,
+      "bge-m3 + minilm-ce top40": 0.619,
+      "bge-m3 + minilm-ce top20": 0.623,
+      "bge-m3 + bge-reranker-base": 0.594,
+      "bge-m3 + bge-reranker-v2-m3": 0.642,
+      "bm25 only": 0.229
+    },
+    "prevention": {
+      "n": 14,
+      "minilm dense": 0.463,
+      "minilm hybrid": 0.384,
+      "qwen3-0.6b dense": 0.681,
+      "qwen3-0.6b hybrid": 0.539,
+      "bge-m3 dense": 0.676,
+      "bge-m3 hybrid": 0.514,
+      "medcpt dense": 0.263,
+      "medcpt hybrid": 0.337,
+      "bge-m3 onnx-int8": 0.672,
+      "bge-m3 + minilm-ce top40": 0.658,
+      "bge-m3 + minilm-ce top20": 0.659,
+      "bge-m3 + bge-reranker-base": 0.592,
+      "bge-m3 + bge-reranker-v2-m3": 0.742,
+      "bm25 only": 0.238
+    },
+    "stages": {
+      "n": 7,
+      "minilm dense": 0.48,
+      "minilm hybrid": 0.648,
+      "qwen3-0.6b dense": 0.815,
+      "qwen3-0.6b hybrid": 0.79,
+      "bge-m3 dense": 0.584,
+      "bge-m3 hybrid": 0.663,
+      "medcpt dense": 0.805,
+      "medcpt hybrid": 0.767,
+      "bge-m3 onnx-int8": 0.636,
+      "bge-m3 + minilm-ce top40": 0.857,
+      "bge-m3 + minilm-ce top20": 0.857,
+      "bge-m3 + bge-reranker-base": 0.435,
+      "bge-m3 + bge-reranker-v2-m3": 0.857,
+      "bm25 only": 0.679
+    },
+    "considerations": {
+      "n": 7,
+      "minilm dense": 0.316,
+      "minilm hybrid": 0.409,
+      "qwen3-0.6b dense": 0.509,
+      "qwen3-0.6b hybrid": 0.538,
+      "bge-m3 dense": 0.413,
+      "bge-m3 hybrid": 0.442,
+      "medcpt dense": 0.267,
+      "medcpt hybrid": 0.366,
+      "bge-m3 onnx-int8": 0.384,
+      "bge-m3 + minilm-ce top40": 0.343,
+      "bge-m3 + minilm-ce top20": 0.372,
+      "bge-m3 + bge-reranker-base": 0.353,
+      "bge-m3 + bge-reranker-v2-m3": 0.49,
+      "bm25 only": 0.331
+    },
+    "complications": {
+      "n": 6,
+      "minilm dense": 0.215,
+      "minilm hybrid": 0.336,
+      "qwen3-0.6b dense": 0.526,
+      "qwen3-0.6b hybrid": 0.427,
+      "bge-m3 dense": 0.558,
+      "bge-m3 hybrid": 0.5,
+      "medcpt dense": 0.291,
+      "medcpt hybrid": 0.238,
+      "bge-m3 onnx-int8": 0.558,
+      "bge-m3 + minilm-ce top40": 0.583,
+      "bge-m3 + minilm-ce top20": 0.583,
+      "bge-m3 + bge-reranker-base": 0.293,
+      "bge-m3 + bge-reranker-v2-m3": 0.613,
+      "bm25 only": 0.298
+    }
+  }
+}

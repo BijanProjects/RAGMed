@@ -1,0 +1,23 @@
+[project]
+name = "ragmed-diagnosis-agent"
+version = "0.1.0"
+description = "Diagnosis agent: corrective RAG over the medical knowledge base, served over A2A."
+requires-python = ">=3.12"
+dependencies = [
+  "a2a-sdk[http-server]>=1.3,<2",
+  "fastmcp>=4.2,<5",
+  "langchain-core>=1.8,<2",
+  "langchain-groq>=1.2,<2",
+  "langgraph>=1.2,<2",
+  "ragmed-a2a",
+  "ragmed-core",
+  "ragmed-llm",
+  "uvicorn>=0.30",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/diagnosis_agent"]

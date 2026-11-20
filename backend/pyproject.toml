@@ -1,0 +1,94 @@
+# Workspace-level tool configuration. Each package under packages/ and
+# services/ has its own pyproject.toml with its runtime dependencies.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["legacy"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W", "F", "I", "B", "UP", "N", "S", "SIM", "RUF", "PT", "C4", "PTH", "ARG", "TID", "PL",
+]
+ignore = ["PLR0913"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "PLR2004", "ARG"]
+# The shared adapter test suite ships inside the package so other adapters can reuse it.
+"**/ragmed_vectorstores/contract.py" = ["S101", "PLR2004", "ARG"]
+# Test fakes implement real interfaces, so they accept arguments they do not use.
+"**/testing.py" = ["ARG"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ragmed_*", "mcp_*", "diagnosis_agent", "coordinator_agent"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["packages", "services"]
+mypy_path = [
+  "packages/ragmed_core/src",
+  "packages/ragmed_retrieval/src",
+  "packages/ragmed_vectorstores/src",
+  "packages/ragmed_a2a/src",
+  "packages/ragmed_llm/src",
+  "services/mcp_medical/src",
+  "services/diagnosis_agent/src",
+  "services/coordinator_agent/src",
+]
+explicit_package_bases = true
+exclude = ["^legacy/"]
+warn_unreachable = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+testpaths = ["packages", "services"]
+pythonpath = [
+  "packages/ragmed_core/src",
+  "packages/ragmed_retrieval/src",
+  "packages/ragmed_vectorstores/src",
+  "packages/ragmed_a2a/src",
+  "packages/ragmed_llm/src",
+  "services/mcp_medical/src",
+  "services/diagnosis_agent/src",
+  "services/coordinator_agent/src",
+]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = [
+  "ragmed_core",
+  "ragmed_retrieval",
+  "ragmed_vectorstores",
+  "ragmed_a2a",
+  "ragmed_llm",
+  "mcp_medical",
+  "diagnosis_agent",
+  "coordinator_agent",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+
+[[tool.mypy.overrides]]
+# Optional benchmark dependencies; not installed in CI.
+module = [
+  "sentence_transformers", "sentence_transformers.*",
+  "transformers", "transformers.*", "torch", "torch.*",
+  "bm25s", "bm25s.*", "Stemmer",
+  "onnxruntime", "onnxruntime.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"

@@ -1,0 +1,4 @@
+# Dev environment plus benchmark-only dependencies (PyTorch, sentence-transformers).
+# Not installed in CI. Compile with `make lock`; install with `make install-bench`.
+-r dev.in
+sentence-transformers>=3.3

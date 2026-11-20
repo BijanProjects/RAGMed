@@ -177,7 +177,13 @@ export function Chat() {
     setContextId(undefined);
   }
 
-  const latest = messages.at(-1)?.id;
+  // The newest reply's buttons are the live ones. After a booking step fails (say, a mistyped
+  // email), the time picker or code box just before it stays usable so the patient can retry.
+  const last = messages.at(-1);
+  const retryable = last?.data?.kind === "no_answer" || (last?.failed && !last.pending);
+  const card = messages.at(-3); // the card, the patient's button press, then the error
+  const isCard = card?.data?.kind === "slots" || card?.data?.kind === "verify_email";
+  const live = new Set([last?.id, retryable && isCard ? card.id : undefined]);
 
   return (
     <div
@@ -231,7 +237,7 @@ export function Chat() {
             <Bubble
               key={message.id}
               message={message}
-              active={message.id === latest && !busy}
+              active={live.has(message.id) && !busy}
               onSend={send}
             />
           ))
@@ -351,6 +357,9 @@ function Bubble({
         )}
         {data?.kind === "slots" && data.offer && (
           <SlotPicker slots={data.slots} offer={data.offer} active={active} onSend={onSend} />
+        )}
+        {data?.kind === "verify_email" && data.verification && (
+          <CodeEntry active={active} onSend={onSend} />
         )}
       </div>
     </div>
@@ -492,7 +501,7 @@ function SlotPicker({
         >
           <p className="text-sm">
             Book <strong>{formatWhen(chosen.start)}</strong> with {chosen.physician} ({chosen.clinician_type},{" "}
-            {minutes} min). We&apos;ll email your invitation.
+            {minutes} min). We&apos;ll email you a code to confirm it&apos;s you, then send your invitation.
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="text-sm">
@@ -522,7 +531,7 @@ function SlotPicker({
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="submit" className={primary} disabled={!ready}>
-              Confirm booking
+              Email me a code
             </button>
             <button type="button" className={secondary} onClick={() => setChosen(null)}>
               Choose another
@@ -531,6 +540,47 @@ function SlotPicker({
         </form>
       )}
     </div>
+  );
+}
+
+function CodeEntry({ active, onSend }: { active: boolean; onSend: (outgoing: Outgoing) => void }) {
+  const [code, setCode] = useState("");
+  const ready = /^\d{6}$/.test(code);
+  if (!active) return null;
+  return (
+    <form
+      className="space-y-3 rounded-xl bg-sky-50 p-3 dark:bg-sky-950/40"
+      aria-label="Enter your code"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (ready) onSend({ action: { type: "confirm", code }, label: "Entered the code" });
+      }}
+    >
+      <label className="block text-sm">
+        <span className="mb-1 block text-neutral-600 dark:text-neutral-400">6-digit code from the email</span>
+        <input
+          value={code}
+          onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          placeholder="123456"
+          className="w-40 rounded-lg border border-black/15 bg-white px-3 py-1.5 font-mono text-lg tracking-[0.3em] outline-none focus:border-sky-500 dark:border-white/15 dark:bg-transparent"
+        />
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <button type="submit" className={primary} disabled={!ready}>
+          Confirm booking
+        </button>
+        <button
+          type="button"
+          className={secondary}
+          onClick={() => onSend({ action: { type: "resend" }, label: "Send a new code" })}
+        >
+          Send a new code
+        </button>
+      </div>
+      <p className="text-xs text-neutral-500">Not there? Check your spam folder.</p>
+    </form>
   );
 }
 

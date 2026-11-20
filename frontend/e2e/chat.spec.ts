@@ -41,10 +41,20 @@ async function mockChat(page: Page, script: (body: Record<string, unknown>) => o
 
 test("the whole intake: questions, report, times, confirmation, booking", async ({ page }) => {
   const requests = await mockChat(page, (body) => {
-    const action = body.action as { type: string; start?: string; clinician_type?: string } | undefined;
+    const action = body.action as { type: string; start?: string; clinician_type?: string; code?: string } | undefined;
     if (action?.type === "book") {
+      return [reply("verify_email", "We sent a 6-digit code to **alex@example.org**.", {
+        verification: { email: "alex@example.org", start: action.start, clinician_type: "Neurology", minutes: 10 },
+      })];
+    }
+    if (action?.type === "confirm" && action.code !== "482913") {
+      return [reply("verify_email", "That code is not right. You have 4 tries left.", {
+        verification: { email: "alex@example.org", start: SLOTS[1].start, clinician_type: "Neurology", minutes: 10 },
+      })];
+    }
+    if (action?.type === "confirm") {
       return [reply("booked", "**Booked.**", {
-        appointment: { reference: "RC-TEST42", start: action.start, end: action.start, minutes: 30,
+        appointment: { reference: "RC-TEST42", start: SLOTS[1].start, end: SLOTS[1].end, minutes: 30,
           clinician_type: "Neurology", physician: "Dr. Joe Public", urgency: "routine", status: "booked" },
       })];
     }
@@ -79,13 +89,29 @@ test("the whole intake: questions, report, times, confirmation, booking", async 
   await page.getByRole("button", { name: /10:30.*Dr\. Joe Public/ }).click();
   const confirm = page.getByRole("form", { name: "Confirm booking" });
   await expect(confirm).toContainText("Monday, November 23, 10:30");
-  const book = confirm.getByRole("button", { name: "Confirm booking" });
+  const book = confirm.getByRole("button", { name: "Email me a code" });
   await expect(book).toBeDisabled(); // name and email first
   await confirm.getByLabel("Your name").fill("Alex Sample");
   await confirm.getByLabel("Email for the invitation").fill("alex@example");
   await expect(book).toBeDisabled(); // not a complete address
   await confirm.getByLabel("Email for the invitation").fill("alex@example.org");
   await book.click();
+
+  // Nothing is booked until the emailed code is entered.
+  await expect(page.getByText(/We sent a 6-digit code/)).toBeVisible();
+  let codeBox = page.getByRole("form", { name: "Enter your code" });
+  const confirmCode = codeBox.getByRole("button", { name: "Confirm booking" });
+  await expect(confirmCode).toBeDisabled();
+  await codeBox.getByLabel(/6-digit code/).fill("12a34"); // letters are dropped
+  await expect(codeBox.getByLabel(/6-digit code/)).toHaveValue("1234");
+  await codeBox.getByLabel(/6-digit code/).fill("111111");
+  await confirmCode.click();
+  await expect(page.getByText("That code is not right. You have 4 tries left.")).toBeVisible();
+
+  codeBox = page.getByRole("form", { name: "Enter your code" }); // a fresh box under the new reply
+  await expect(codeBox).toHaveCount(1);
+  await codeBox.getByLabel(/6-digit code/).fill("482913");
+  await codeBox.getByRole("button", { name: "Confirm booking" }).click();
 
   await expect(page.getByText("Your visit is booked")).toBeVisible();
   await expect(page.getByText("RC-TEST42")).toBeVisible();
@@ -101,6 +127,8 @@ test("the whole intake: questions, report, times, confirmation, booking", async 
       type: "book", start: "2026-11-23T10:30:00-03:30", clinician_type: "Neurology",
       name: "Alex Sample", email: "alex@example.org",
     },
+    { type: "confirm", code: "111111" },
+    { type: "confirm", code: "482913" },
   ]);
   expect(requests.slice(1).every((r) => r.contextId === "ctx-1")).toBe(true);
 });
@@ -173,4 +201,37 @@ test("a usage limit is shown as a readable message and the chat stays usable", a
   await expect(page.getByText(LIMIT)).toBeVisible();
   await expect(page.locator('[data-kind="error"]')).toHaveCount(1);
   await expect(box).toBeEnabled();
+});
+
+test("after a booking error the time picker can be used again", async ({ page }) => {
+  let attempts = 0;
+  await mockChat(page, (body) => {
+    const action = body.action as { type: string } | undefined;
+    if (action?.type === "book") {
+      attempts += 1;
+      return attempts === 1
+        ? [reply("no_answer", "That email address was refused. Please check it.")]
+        : [reply("verify_email", "We sent a 6-digit code.", {
+            verification: { email: "alex@example.org", start: SLOTS[0].start, clinician_type: "Neurology", minutes: 10 },
+          })];
+    }
+    if (action?.type === "show_slots") return [reply("slots", "Here are open times.", { slots: SLOTS, offer: OFFER })];
+    return [reply("report", "## Draft pre-visit report", { urgency: "routine", offer: OFFER })];
+  });
+
+  await openChat(page);
+  await page.getByRole("button", { name: /headaches on one side/ }).click();
+  await page.getByRole("button", { name: /See available times/ }).click();
+  const fill = async () => {
+    await page.getByRole("button", { name: /9:00.*Dr\. Fred Nurk/ }).click();
+    const form = page.getByRole("form", { name: "Confirm booking" });
+    await form.getByLabel("Your name").fill("Alex Sample");
+    await form.getByLabel("Email for the invitation").fill("alex@example.org");
+    await form.getByRole("button", { name: "Email me a code" }).click();
+  };
+  await fill();
+  await expect(page.getByText("That email address was refused. Please check it.")).toBeVisible();
+
+  await fill();
+  await expect(page.getByRole("form", { name: "Enter your code" })).toBeVisible();
 });

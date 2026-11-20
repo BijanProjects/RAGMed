@@ -8,15 +8,21 @@ const MAX_MESSAGE_CHARS = 2000;
 const TURNSTILE_SECRET = process.env.TURNSTILE_SECRET_KEY;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const EMAIL = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$/;
+const CODE = /^\d{6}$/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?([+-]\d{2}:\d{2}|Z)$/;
 
-/** Only the two known buttons, with only their known fields, reach the backend. */
+/** Only the known buttons, with only their known fields, reach the backend. */
 function parseAction(value: unknown): ChatAction | undefined | null {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
   const kind = typeof raw.clinician_type === "string" ? raw.clinician_type.slice(0, 60) : undefined;
   if (raw.type === "show_slots") return { type: "show_slots", clinician_type: kind };
+  if (raw.type === "resend") return { type: "resend" };
+  if (raw.type === "confirm") {
+    const code = typeof raw.code === "string" ? raw.code.trim() : "";
+    return CODE.test(code) ? { type: "confirm", code } : null;
+  }
   if (raw.type === "book" && typeof raw.start === "string" && ISO_TIME.test(raw.start)) {
     const name = typeof raw.name === "string" ? raw.name.trim().slice(0, 80) : "";
     const email = typeof raw.email === "string" ? raw.email.trim() : "";

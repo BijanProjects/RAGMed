@@ -39,6 +39,9 @@ test("unknown actions and bad booking emails are refused before the check", asyn
     data: { action: { type: "book", start: "2026-11-23T09:00:00-03:30", name: "A", email: "nope" } },
   });
 
+  const badCode = await request.post("/api/chat", { data: { action: { type: "confirm", code: "12345x" } } });
+
   expect(unknown.status()).toBe(400);
   expect(badEmail.status()).toBe(400);
+  expect(badCode.status()).toBe(400);
 });

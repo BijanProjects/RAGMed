@@ -4,6 +4,7 @@ export type ReplyKind =
   | "question"
   | "report"
   | "slots"
+  | "verify_email"
   | "booked"
   | "answer"
   | "no_answer"
@@ -43,6 +44,14 @@ export interface Appointment {
   status: string;
 }
 
+/** A booking waiting for the code emailed to the patient. */
+export interface Verification {
+  email: string;
+  start: string;
+  clinician_type: string;
+  minutes: number; // how long the code is valid
+}
+
 export interface Report {
   title: string;
   notice: string;
@@ -72,12 +81,15 @@ export interface ReplyData {
   offer: Offer | null;
   slots: Slot[];
   appointment: Appointment | null;
+  verification?: Verification | null;
 }
 
 /** A button press, sent to the Coordinator alongside (or instead of) text. */
 export type ChatAction =
   | { type: "show_slots"; clinician_type?: string }
-  | { type: "book"; start: string; clinician_type?: string; name: string; email: string };
+  | { type: "book"; start: string; clinician_type?: string; name: string; email: string } // emails a code
+  | { type: "resend" }
+  | { type: "confirm"; code: string };
 
 /** What /api/chat streams to the browser, one JSON object per event. */
 export type ChatEvent =

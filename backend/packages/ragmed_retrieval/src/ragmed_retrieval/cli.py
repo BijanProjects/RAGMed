@@ -1,12 +1,14 @@
 """Command-line entry points: `python -m ragmed_retrieval <command>`."""
 
 import argparse
+import dataclasses
 import json
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from ragmed_retrieval.benchmark import (
+    RERANK_DEPTH,
     BenchmarkResult,
     Pipeline,
     document_vectors,
@@ -26,6 +28,7 @@ from ragmed_retrieval.embedding import (
 from ragmed_retrieval.evalset import build_eval_set, load_eval_set, save_eval_set
 from ragmed_retrieval.hybrid import RERANKER_PRESETS, BM25Retriever, Reranker
 from ragmed_retrieval.metrics import RetrievalScores, dedupe
+from ragmed_retrieval.onnx import MODEL_FILE, OnnxEmbedder, Pooling, export_onnx
 
 # Short name -> (Hugging Face id, query prompt name)
 MODEL_PRESETS: dict[str, tuple[str, str | None]] = {
@@ -40,6 +43,10 @@ MODEL_PRESETS: dict[str, tuple[str, str | None]] = {
 # Chosen by the benchmark: tied with Qwen3-Embedding-0.6B on accuracy, faster on CPU.
 # See ../README.md#embedding-benchmark.
 DEFAULT_MODEL = "bge-m3"
+
+# Models that can be exported to ONNX, with the pooling each was trained with.
+ONNX_POOLING: dict[str, Pooling] = {"bge-m3": "cls", "minilm": "mean"}
+ONNX_DIR = Path("data/artifacts/onnx")
 
 EmbedderFactory = Callable[[str, str | None, str | None], Embedder]
 RerankerFactory = Callable[[str], Reranker]
@@ -68,6 +75,37 @@ def _resolve(model: str, query_prompt: str | None = None) -> tuple[str, str | No
     return MODEL_PRESETS.get(model, (model, query_prompt))
 
 
+def _onnx_dir(root: Path, model_id: str) -> Path:
+    return root / model_id.replace("/", "__")
+
+
+def _load_embedder(
+    args: argparse.Namespace, factory: EmbedderFactory, model_id: str, query_prompt: str | None
+) -> tuple[Embedder, str]:
+    """The embedder for the chosen runtime, and a label saying how it runs.
+
+    `onnx` runs the int8 export on CPU (what the server uses); `torch` runs the original model;
+    `auto` picks ONNX when an export exists.
+    """
+    onnx_dir = _onnx_dir(args.onnx_dir, model_id)
+    use_onnx = args.runtime == "onnx" or (
+        args.runtime == "auto" and (onnx_dir / MODEL_FILE).exists()
+    )
+    if use_onnx:
+        if not (onnx_dir / MODEL_FILE).exists():
+            raise SystemExit(f"no ONNX export in {onnx_dir}; run: make export-onnx")
+        return OnnxEmbedder(onnx_dir, threads=args.threads or 4), "onnx-int8"
+    _limit_threads(args.threads)
+    return factory(model_id, query_prompt, args.device), "torch"
+
+
+def _export(args: argparse.Namespace) -> int:  # pragma: no cover - needs PyTorch and weights
+    model_id, _ = _resolve(args.model)
+    path = export_onnx(model_id, _onnx_dir(args.out, model_id), pooling=ONNX_POOLING[args.model])
+    print(f"{model_id} -> {path} ({path.stat().st_size / 1e6:.0f} MB)")
+    return 0
+
+
 def _default_reranker(name: str) -> Reranker:  # pragma: no cover
     return RERANKER_PRESETS[name]()
 
@@ -84,7 +122,6 @@ def _benchmark(
     args: argparse.Namespace, factory: EmbedderFactory, reranker_factory: RerankerFactory
 ) -> int:
     model_id, query_prompt = _resolve(args.model, args.query_prompt)
-    _limit_threads(args.threads)
     pairs, _ = load_medquad(args.corpus)
     chunks = chunk_pairs(pairs)
     queries = load_eval_set(args.eval)
@@ -92,24 +129,29 @@ def _benchmark(
     pipeline = Pipeline(
         sparse=BM25Retriever([c.text for c in chunks]) if args.hybrid else None,
         reranker=reranker_factory(args.rerank) if args.rerank else None,
+        rerank_depth=args.rerank_depth,
     )
-    embedder = factory(model_id, query_prompt, args.device)
+    embedder, runtime = _load_embedder(args, factory, model_id, query_prompt)
 
     result = run_benchmark(embedder, chunks, queries, pipeline=pipeline, cache_dir=args.cache)
+    result = dataclasses.replace(result, runtime=runtime)
 
     args.out.mkdir(parents=True, exist_ok=True)
     path = args.out / result_filename(result, model_id)
     path.write_text(result.to_json() + "\n", encoding="utf-8")
+    per_query = args.out / "per-query" / path.name
+    per_query.parent.mkdir(exist_ok=True)
+    per_query.write_text(json.dumps(result.per_query) + "\n", encoding="utf-8")
     print(f"{model_id} [{result.pipeline}]: nDCG@10={result.scores.ndcg_at_10:.3f} -> {path}")
     return 0
 
 
 def _search(args: argparse.Namespace, factory: EmbedderFactory) -> int:
     model_id, query_prompt = _resolve(args.model)
-    _limit_threads(args.threads)
     pairs, _ = load_medquad(args.corpus)
     chunks = chunk_pairs(pairs)
-    embedder = factory(model_id, query_prompt, args.device)
+    embedder, runtime = _load_embedder(args, factory, model_id, query_prompt)
+    where = "cpu" if runtime == "onnx-int8" else (args.device or "auto")
     doc_vectors, seconds = document_vectors(embedder, chunks, args.cache)
     if seconds:
         print(f"embedded {len(chunks)} passages in {seconds:.0f} s (saved for next time)")
@@ -125,7 +167,7 @@ def _search(args: argparse.Namespace, factory: EmbedderFactory) -> int:
             parent = chunks[index].parent_id
             if parent not in best:
                 best[parent] = (float(query_vector[0] @ doc_vectors[index]), index)
-        print(f"\nQ: {question}\n   {model_id} on {args.device or 'auto'}: {elapsed_ms:.0f} ms")
+        print(f"\nQ: {question}\n   {model_id} ({runtime}, {where}): {elapsed_ms:.0f} ms")
         for rank, parent in enumerate(dedupe(chunks[i].parent_id for i in ranked)[: args.top_k], 1):
             score, index = best[parent]
             chunk = chunks[index]
@@ -169,19 +211,31 @@ def _parser() -> argparse.ArgumentParser:
     bench.add_argument("--cache", type=Path, default=Path("data/artifacts/embeddings"))
     bench.add_argument("--out", type=Path, default=Path("evals/results"))
     bench.add_argument("--hybrid", action="store_true", help="fuse dense with BM25 (RRF)")
-    bench.add_argument("--rerank", choices=sorted(RERANKER_PRESETS), help="rerank the top 40")
+    bench.add_argument("--rerank", choices=list(RERANKER_PRESETS), help="rerank the top candidates")
+    bench.add_argument("--rerank-depth", type=int, default=RERANK_DEPTH, help="how many to rerank")
     bench.add_argument("--device", default=None, help="cpu, mps or cuda (default: best available)")
     bench.add_argument("--threads", type=int, default=None, help="CPU threads (Oracle server: 4)")
+    bench.add_argument("--runtime", choices=["torch", "onnx"], default="torch")
+    bench.add_argument("--onnx-dir", type=Path, default=ONNX_DIR)
 
     search = sub.add_parser("search", help="ask questions against the knowledge base")
     search.add_argument("questions", nargs="+", help="one or more questions, each in quotes")
     search.add_argument("--model", default=DEFAULT_MODEL, choices=sorted(MODEL_PRESETS))
     search.add_argument("--device", default="cpu", help="cpu (as on the server), mps or cuda")
     search.add_argument("--threads", type=int, default=4, help="CPU threads (Oracle server: 4)")
+    search.add_argument(
+        "--runtime", choices=["auto", "onnx", "torch"], default="auto",
+        help="auto: the int8 ONNX export if it exists, else the original model",
+    )  # fmt: skip
+    search.add_argument("--onnx-dir", type=Path, default=ONNX_DIR)
     search.add_argument("--top-k", type=int, default=5)
     search.add_argument("--width", type=int, default=160, help="characters of each passage shown")
     search.add_argument("--corpus", type=Path, default=Path("data/raw/medquad.csv"))
     search.add_argument("--cache", type=Path, default=Path("data/artifacts/embeddings"))
+
+    export = sub.add_parser("export-onnx", help="export a model to int8 ONNX for fast CPU use")
+    export.add_argument("--model", default=DEFAULT_MODEL, choices=sorted(ONNX_POOLING))
+    export.add_argument("--out", type=Path, default=ONNX_DIR)
 
     report = sub.add_parser("report", help="print a markdown table of saved results")
     report.add_argument("--results", type=Path, default=Path("evals/results"))
@@ -200,4 +254,6 @@ def main(
         return _benchmark(args, factory, reranker_factory)
     if args.command == "search":
         return _search(args, factory)
+    if args.command == "export-onnx":
+        return _export(args)
     return _report(args)

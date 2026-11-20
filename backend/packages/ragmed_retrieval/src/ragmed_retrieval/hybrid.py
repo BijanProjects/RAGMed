@@ -173,7 +173,10 @@ class Qwen3Reranker:  # pragma: no cover - needs model weights
         return scores
 
 
+# Smallest first: 23M, 278M, 568M and 600M parameters.
 RERANKER_PRESETS: dict[str, Callable[[], Reranker]] = {
-    "qwen3-reranker-0.6b": Qwen3Reranker,
+    "minilm-ce": lambda: CrossEncoderReranker("cross-encoder/ms-marco-MiniLM-L6-v2"),
+    "bge-reranker-base": lambda: CrossEncoderReranker("BAAI/bge-reranker-base"),
     "bge-reranker-v2-m3": lambda: CrossEncoderReranker("BAAI/bge-reranker-v2-m3"),
+    "qwen3-reranker-0.6b": Qwen3Reranker,
 }

@@ -14,9 +14,11 @@ ignore = ["PLR0913"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S101", "PLR2004", "ARG"]
+# The shared adapter test suite ships inside the package so other adapters can reuse it.
+"**/ragmed_vectorstores/contract.py" = ["S101", "PLR2004", "ARG"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ragmed_*"]
+known-first-party = ["ragmed_*", "mcp_*"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -25,8 +27,13 @@ ban-relative-imports = "all"
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["packages"]
-mypy_path = ["packages/ragmed_core/src", "packages/ragmed_retrieval/src"]
+files = ["packages", "services"]
+mypy_path = [
+  "packages/ragmed_core/src",
+  "packages/ragmed_retrieval/src",
+  "packages/ragmed_vectorstores/src",
+  "services/mcp_medical/src",
+]
 explicit_package_bases = true
 exclude = ["^legacy/"]
 warn_unreachable = true
@@ -37,14 +44,19 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
-testpaths = ["packages"]
-pythonpath = ["packages/ragmed_core/src", "packages/ragmed_retrieval/src"]
+testpaths = ["packages", "services"]
+pythonpath = [
+  "packages/ragmed_core/src",
+  "packages/ragmed_retrieval/src",
+  "packages/ragmed_vectorstores/src",
+  "services/mcp_medical/src",
+]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
 filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
-source = ["ragmed_core", "ragmed_retrieval"]
+source = ["ragmed_core", "ragmed_retrieval", "ragmed_vectorstores", "mcp_medical"]
 
 [tool.coverage.report]
 fail_under = 80
@@ -57,6 +69,7 @@ module = [
   "sentence_transformers", "sentence_transformers.*",
   "transformers", "transformers.*", "torch", "torch.*",
   "bm25s", "bm25s.*", "Stemmer",
+  "onnxruntime", "onnxruntime.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

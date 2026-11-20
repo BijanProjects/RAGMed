@@ -3,8 +3,10 @@ from itertools import count
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from ragmed_retrieval.benchmark import (
+    PROGRESS_EVERY,
     BenchmarkResult,
     Pipeline,
     corpus_fingerprint,
@@ -118,5 +120,14 @@ def test_reranker_changes_the_ranking() -> None:
     assert result.pipeline == "dense+rerank"
     assert result.reranker == "org/reverse-reranker"
     assert result.scores.hit_at_1 < 1.0
-    assert result_filename(result) == "test__hashing--dense+rerank--reverse-reranker.json"
-    assert "dense+rerank (`reverse-reranker`)" in results_table([result])
+    assert result.rerank_depth == 4
+    assert result_filename(result) == "test__hashing--dense+rerank--reverse-reranker--top4.json"
+    assert "dense+rerank (`reverse-reranker`, top 4)" in results_table([result])
+
+
+def test_reranking_reports_progress(capsys: pytest.CaptureFixture[str]) -> None:
+    queries = [QUERIES[i % 3] for i in range(PROGRESS_EVERY)]
+
+    run_benchmark(HashingEmbedder(), CHUNKS, queries, pipeline=Pipeline(reranker=ReverseReranker()))
+
+    assert f"reranked {PROGRESS_EVERY}/{PROGRESS_EVERY}" in capsys.readouterr().err

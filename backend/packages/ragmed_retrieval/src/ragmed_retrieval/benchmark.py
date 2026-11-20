@@ -6,9 +6,10 @@ of those followed by a reranker over the top `rerank_depth` candidates.
 
 import hashlib
 import json
+import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -17,11 +18,12 @@ from ragmed_retrieval.chunking import Chunk
 from ragmed_retrieval.embedding import Embedder, Vectors
 from ragmed_retrieval.evalset import EvalQuery
 from ragmed_retrieval.hybrid import Reranker, SparseRetriever, rerank_head, rrf_fuse
-from ragmed_retrieval.metrics import RetrievalScores, dedupe, score_run
+from ragmed_retrieval.metrics import RetrievalScores, dedupe, ndcg_at_k, score_run
 
 CANDIDATE_POOL = 100
 RERANK_DEPTH = 40
 LATENCY_SAMPLE = 100
+PROGRESS_EVERY = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,9 +49,15 @@ class BenchmarkResult:
     scores: RetrievalScores
     pipeline: str = "dense"
     reranker: str | None = None
+    rerank_depth: int | None = None
+    runtime: str = "torch"
+    # nDCG@10 for each question id, used for significance tests; saved in its own file.
+    per_query: dict[str, float] = field(default_factory=dict, repr=False, compare=False)
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self), indent=2)
+        summary = asdict(self)
+        del summary["per_query"]
+        return json.dumps(summary, indent=2)
 
 
 def corpus_fingerprint(chunks: Sequence[Chunk]) -> str:
@@ -105,10 +113,14 @@ def _retrieve(
         ranked = [rrf_fuse([d, s]) for d, s in zip(dense, sparse, strict=True)]
     if pipeline.reranker is not None:
         passages = [c.text for c in chunks]
-        ranked = [
-            rerank_head(text, row, passages, pipeline.reranker, pipeline.rerank_depth)
-            for text, row in zip(texts, ranked, strict=True)
-        ]
+        reranked = []
+        for done, (text, row) in enumerate(zip(texts, ranked, strict=True), start=1):
+            reranked.append(
+                rerank_head(text, row, passages, pipeline.reranker, pipeline.rerank_depth)
+            )
+            if done % PROGRESS_EVERY == 0:
+                print(f"reranked {done}/{len(texts)} questions", file=sys.stderr, flush=True)
+        ranked = reranked
     return ranked
 
 
@@ -158,6 +170,11 @@ def run_benchmark(
         scores=score_run(results),
         pipeline=pipeline.label,
         reranker=pipeline.reranker.name if pipeline.reranker is not None else None,
+        rerank_depth=pipeline.rerank_depth if pipeline.reranker is not None else None,
+        per_query={
+            query.id: round(ndcg_at_k(ranked_ids, relevant, 10), 6)
+            for (ranked_ids, relevant), query in zip(results, queries, strict=True)
+        },
     )
 
 
@@ -179,16 +196,24 @@ def results_table(results: Sequence[BenchmarkResult]) -> str:
 
 
 def _pipeline_cell(result: BenchmarkResult) -> str:
-    if result.reranker is None:
-        return result.pipeline
-    return f"{result.pipeline} (`{result.reranker.rsplit('/', 1)[-1]}`)"
+    cell = result.pipeline
+    if result.reranker is not None:
+        depth = f", top {result.rerank_depth}" if result.rerank_depth else ""
+        cell += f" (`{result.reranker.rsplit('/', 1)[-1]}`{depth})"
+    if result.runtime != "torch":
+        cell += f", {result.runtime}"
+    return cell
 
 
 def result_filename(result: BenchmarkResult, model_id: str | None = None) -> str:
     """File name for a saved result; `model_id` overrides the embedder's own name."""
     slug = (model_id or result.model).replace("/", "__")
+    if result.runtime != "torch":
+        slug += f"--{result.runtime}"
     if result.pipeline != "dense":
         slug += f"--{result.pipeline}"
     if result.reranker is not None:
         slug += f"--{result.reranker.rsplit('/', 1)[-1]}"
+        if result.rerank_depth not in (None, RERANK_DEPTH):
+            slug += f"--top{result.rerank_depth}"
     return f"{slug}.json"

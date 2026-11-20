@@ -71,6 +71,10 @@ echo "  building and starting (first time ~5 minutes)"
 "${SSH[@]}" "cd /opt/ragmed/app && docker compose -f infra/compose/prod.yml \
   --env-file /opt/ragmed/.env.production up -d --build --remove-orphans --wait --wait-timeout 600" \
   2>&1 | grep -vE "^\s*$|Pulling|Waiting|Downloading|Extracting|Verifying|Download complete|Pull complete" || true
+# Caddy reads the Caddyfile from the code folder, which every deploy replaces: recreate it so
+# it sees the new file (a reload would still read the old, deleted one).
+"${SSH[@]}" "cd /opt/ragmed/app && docker compose -f infra/compose/prod.yml \
+  --env-file /opt/ragmed/.env.production up -d --force-recreate --no-deps caddy" > /dev/null 2>&1
 "${SSH[@]}" "cd /opt/ragmed/app && docker compose -f infra/compose/prod.yml \
   --env-file /opt/ragmed/.env.production ps --format '  {{.Service}}: {{.Status}}'"
 echo "  server: $IP   API: https://$API_HOST (needs the DNS record)"

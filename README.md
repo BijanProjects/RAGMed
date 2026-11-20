@@ -2,16 +2,19 @@
 
 [![CI](https://github.com/BijanProjects/RAGMed/actions/workflows/ci.yml/badge.svg)](https://github.com/BijanProjects/RAGMed/actions/workflows/ci.yml)
 
+**Live demo: [ragmed.bijanroudini.com](https://ragmed.bijanroudini.com)**
+
 RAGMed is a multi-agent clinical triage assistant. A patient describes their symptoms and gets an
 answer grounded in a curated medical knowledge base, with citations. When a visit is warranted, the
 system offers real appointment slots and books one after the patient confirms.
 
-> **Status:** active rebuild. The retrieval layer (finding the right medical passage for a question)
-> is built and benchmarked. The agents, the web app and the deployment come next. See the
-> [roadmap](#roadmap).
+> **Status:** live. RAGMed Clinic interviews the patient, drafts a pre-visit report for the
+> clinician, and books a visit, running on free cloud tiers. Next: monitoring and an evaluation
+> suite. See the [roadmap](#roadmap).
 
 **Contents:** [Try it](#try-it-locally) · [How it fits together](#how-it-fits-together) ·
-[Project structure](#project-structure) · [Embedding benchmark](#embedding-benchmark) ·
+[Deployment](#deployment) · [Project structure](#project-structure) ·
+[Embedding benchmark](#embedding-benchmark) ·
 [Roadmap](#roadmap)
 
 ## Try it locally
@@ -132,6 +135,44 @@ slots, so every request passes these checks:
   address, which it reads from Vercel's headers.
 - Without `TURNSTILE_SECRET_KEY`, the bot check is off (local development). `make demo` uses
   Cloudflare's published test keys, which always pass.
+
+## Deployment
+
+Everything runs on free tiers, so the demo can stay online indefinitely at no cost.
+
+```mermaid
+flowchart LR
+    browser([Browser]) -->|HTTPS| vercel["Web app<br/>Vercel Hobby<br/>ragmed.bijanroudini.com"]
+    browser -.->|bot check| ts["Cloudflare<br/>Turnstile"]
+    vercel -->|"HTTPS + token"| caddy
+    subgraph vm["Oracle Cloud Always Free Arm server (4 OCPUs, 24 GB)"]
+        caddy["Caddy<br/>Let's Encrypt"] --> coord["Care Coordinator"]
+        caddy --> sched["Scheduling MCP<br/>(clinician list only)"]
+        coord --> diag["Diagnosis agent"] --> med["Medical MCP<br/>BGE-M3 + Qdrant"]
+        coord --> sched
+        coord --- pg[("Postgres")]
+        coord --- vk[("Valkey")]
+    end
+    diag --> groq["Groq<br/>free tier"]
+    sched --> cal["Cal.com"]
+    coord --> gmail["Gmail SMTP<br/>booking codes"]
+```
+
+| Part | Service | Cost |
+| --- | --- | --- |
+| Web app | Vercel Hobby, deployed on every push to `main` | $0 |
+| Backend | Oracle Cloud Always Free: one Arm VM sized exactly to the monthly allowance (3,000 OCPU-hours, 18,000 GB-hours) | $0 |
+| HTTPS | Caddy with Let's Encrypt | $0 |
+| Bot check, models, calendar, email | Cloudflare Turnstile, Groq, Cal.com, Gmail | $0 |
+
+- `make infra` creates or updates the server with Terraform (`infra/terraform/`). It allows SSH
+  only from the deployer's current IP address and retries while Oracle has no free Arm capacity.
+- `make deploy` ships the last commit, the search index and the ONNX model, then starts
+  `infra/compose/prod.yml` and waits until every service is healthy. Secrets are generated once
+  into a git-ignored `.env.production`; every link between services has its own token.
+- Only Caddy is reachable from the internet, and it exposes only the Care Coordinator and the
+  clinician list, both behind tokens. The Diagnosis agent, the MCP servers, Postgres and Valkey
+  stay on the private Docker network.
 
 ## Project structure
 
@@ -448,10 +489,10 @@ are saved, so re-runs take seconds.
 ```mermaid
 flowchart LR
     P1["1 · Tooling<br/>and CI"]:::done --> P2["2 · Retrieval and<br/>benchmark"]:::done
-    P2 --> P3["3–5 · Vector stores<br/>and MCP servers"]:::now
-    P3 --> P4["6–8 · The three<br/>agents over A2A"]:::now
-    P4 --> P5["9–11 · Monitoring,<br/>web app, accounts"]:::todo
-    P5 --> P6["12–15 · Oracle VM,<br/>CI/CD, launch"]:::todo
+    P2 --> P3["3–5 · Vector stores<br/>and MCP servers"]:::done
+    P3 --> P4["6–8 · The three<br/>agents over A2A"]:::done
+    P4 --> P5["9–11 · Monitoring,<br/>web app, accounts"]:::now
+    P5 --> P6["12–15 · Oracle VM,<br/>CI/CD, launch"]:::done
 
     classDef done fill:#d3f9d8,stroke:#2b8a3e,color:#000
     classDef now fill:#fff3bf,stroke:#e67700,color:#000
@@ -468,8 +509,8 @@ flowchart LR
   pre-visit report, booking in the chat
 - [x] Abuse protection: bot check, rate limits, booking caps, conversations in Postgres
 - [ ] Observability and evaluation suite
-- [ ] Web frontend *(chat working locally; Vercel deployment next)*
-- [ ] Infrastructure as code and continuous deployment (Oracle Cloud Always Free VM)
+- [x] Web frontend on Vercel
+- [x] Infrastructure as code (Terraform) and one-command deploys to an Oracle Cloud Always Free VM
 
 ## Data
 

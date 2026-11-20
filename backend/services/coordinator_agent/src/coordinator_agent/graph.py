@@ -28,6 +28,7 @@ from coordinator_agent.intake import (
     MAX_QUESTIONS,
     Interviewer,
     case_summary,
+    is_repeat,
     merge,
     quick_replies,
 )
@@ -147,17 +148,23 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         said: Turn = {"role": "patient", "text": state["message"]}
         transcript: list[Turn] = [*state.get("interview", []), said]
         questions = state.get("questions", 0)
-        turn = await interviewer.next_turn(state.get("case", {}), history_text(transcript, 40))
-        case = merge(state.get("case", {}), turn.updates)
-        if not case.get("main_problem"):  # the patient's own first words, never our question
-            first = next((t["text"] for t in transcript if t["role"] == "patient"), "")
-            case["main_problem"] = first
+        known = dict(state.get("case", {}))
+        if not known.get("main_problem"):  # the patient's own first words, never our question
+            known["main_problem"] = next(t["text"] for t in transcript if t["role"] == "patient")
+        turn = await interviewer.next_turn(known, history_text(transcript, 40))
+        case = merge(known, turn.updates)
         if state.get("asked_final"):
             if not _nothing_more(state["message"]):
                 case["other_notes"] = state["message"]
             return {"case": case, "interview": transcript, "phase": "assessing"}
 
-        done = turn.complete or not turn.next_question.strip() or questions >= MAX_QUESTIONS
+        asked = [t["text"] for t in transcript if t["role"] == "assistant"]
+        done = (
+            turn.complete
+            or not turn.next_question.strip()
+            or questions >= MAX_QUESTIONS
+            or is_repeat(turn.next_question, asked)  # a third try at the same question
+        )
         if done:  # always end with the open question
             question, replies, asked_final = FINAL_QUESTION, ["No, that's everything"], True
         else:

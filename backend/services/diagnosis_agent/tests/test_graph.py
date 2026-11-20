@@ -6,6 +6,7 @@ from diagnosis_agent.graph import (
     build_graph,
     finalise,
     insufficient_result,
+    label,
     number_passages,
     remove_doses,
     remove_sentences,
@@ -208,3 +209,15 @@ def test_triage_fields_pass_through() -> None:
     result = finalise(draft(clinician_type="Neurology", visit_minutes=30), PASSAGES, "q")
 
     assert (result.clinician_type, result.visit_minutes) == ("Neurology", 30)
+
+
+def test_sources_without_a_subject_show_the_passages_opening_words() -> None:
+    generic = PASSAGES[0].model_copy(
+        update={
+            "question": "Who is at risk for?",
+            "text": "Measles: make sure your child is protected.",
+        }
+    )
+
+    assert label(generic).startswith("Who is at risk for? Measles: make sure")
+    assert label(PASSAGES[1]) == "How is asthma treated?"

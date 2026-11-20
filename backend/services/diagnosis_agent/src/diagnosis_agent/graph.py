@@ -36,6 +36,7 @@ INSUFFICIENT = (
 # removed whatever the model says: RAGMed never suggests a medication dose.
 _DOSE = re.compile(r"\b\d+(?:[.,]\d+)?\s?(?:mg|mcg|µg|g|ml|mL|IU|units?)\b", re.IGNORECASE)
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
+MIN_LABEL = 20  # questions shorter than this rarely say what they are about
 
 
 class State(TypedDict, total=False):
@@ -57,6 +58,16 @@ def number_passages(passages: list[Passage], only: set[int] | None = None) -> st
 
 
 _URGENCY_ORDER: list[Urgency] = ["self_care", "routine", "urgent", "emergency"]
+
+
+def label(passage: Passage) -> str:
+    """How to name a source. Some MedQuAD questions lack their subject ("Who is at risk for?"),
+    so those show the passage's opening words instead."""
+    question = passage.question.strip()
+    if re.search(r"\b(for|of|about|is \(are\))\s*\?$", question) or len(question) < MIN_LABEL:
+        opening = " ".join(passage.text.split()[:12])
+        return f"{question} {opening}…"
+    return question
 
 
 def remove_doses(text: str) -> str:
@@ -107,9 +118,7 @@ def finalise(draft: DiagnosisAnswer, passages: list[Passage], query: str) -> Dia
     return DiagnosisResult(
         answer=answer,
         citations=[
-            Citation(
-                number=n, answer_id=passages[n - 1].answer_id, question=passages[n - 1].question
-            )
+            Citation(number=n, answer_id=passages[n - 1].answer_id, question=label(passages[n - 1]))
             for n in numbers
         ],
         possible_conditions=draft.possible_conditions,

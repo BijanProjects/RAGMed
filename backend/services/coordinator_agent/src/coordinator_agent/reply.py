@@ -1,11 +1,12 @@
 """What the Coordinator sends back: readable text plus structured data for the web app."""
 
+import re
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from coordinator_agent.intake import LABELS
+from coordinator_agent.intake import LABELS, is_straightforward_request
 from ragmed_core.clinic import CLINIC_NAME, DRAFT_NOTICE, GENERAL_PHYSICIAN
 
 ReplyKind = Literal[
@@ -107,21 +108,39 @@ def from_diagnosis(data: dict[str, Any], urgent_guidance: str) -> Reply:
     )
 
 
+def _without_disclaimer(text: str) -> str:
+    """The report shows its own notice, so drop a disclaimer the model copied into its answer."""
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept = [
+        s for s in sentences if "educational project" not in s and "local emergency number" not in s
+        and "does not replace a clinician" not in s
+    ]  # fmt: skip
+    return " ".join(kept).strip()
+
+
 def build_report(case: dict[str, str], data: dict[str, Any]) -> dict[str, Any]:
     """The draft pre-visit report the physician receives with the booking."""
     sources = _sources(data)
+    urgency = str(data.get("urgency", "routine"))
+    clinician = str(data.get("clinician_type") or GENERAL_PHYSICIAN)
+    minutes = int(data.get("visit_minutes") or 30)
+    reason = str(data.get("visit_reason", ""))
+    if is_straightforward_request(case) and urgency in ("self_care", "routine"):
+        # The clinic's rule, whatever the model chose: renewals, notes, forms are short GP visits.
+        clinician, minutes = GENERAL_PHYSICIAN, 15
+        reason = "A straightforward request such as a renewal or a note fits a short visit."
     facts = [f"{LABELS[k]}: {v}" for k, v in case.items() if k in LABELS and v]
     return {
         "title": "Draft pre-visit report",
         "notice": DRAFT_NOTICE,
         "summary": "; ".join(facts),
         "case": {LABELS[k]: v for k, v in case.items() if k in LABELS and v},
-        "assessment": str(data.get("answer", "")).strip(),
+        "assessment": _without_disclaimer(str(data.get("answer", ""))),
         "possible_conditions": [str(c) for c in data.get("possible_conditions", [])],
-        "urgency": str(data.get("urgency", "routine")),
-        "clinician_type": str(data.get("clinician_type") or GENERAL_PHYSICIAN),
-        "visit_minutes": int(data.get("visit_minutes") or 30),
-        "visit_reason": str(data.get("visit_reason", "")),
+        "urgency": urgency,
+        "clinician_type": clinician,
+        "visit_minutes": minutes,
+        "visit_reason": reason,
         "sources": [s.model_dump() for s in sources],
         "sufficient_evidence": bool(data.get("sufficient_evidence")),
         "created_at": datetime.now(UTC).isoformat(),

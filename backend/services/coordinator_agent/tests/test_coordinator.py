@@ -119,6 +119,7 @@ async def test_symptoms_start_an_interview_with_one_question_at_a_time() -> None
     assert second.text == "How bad is it, from 0 to 10?"
     assert len(chat.router.seen) == 1  # during the interview, answers are not re-routed
     case, transcript = chat.interviewer.calls[1]
+    assert chat.interviewer.calls[0][0] == {"main_problem": "I keep getting headaches on one side"}
     assert case["main_problem"] == "I keep getting headaches on one side"
     assert "patient: About a month" in transcript
 
@@ -132,6 +133,15 @@ async def test_the_interview_always_ends_with_the_open_question() -> None:
 
     assert final.text == FINAL_QUESTION
     assert data(final)["quick_replies"] == ["No, that's everything"]
+
+
+async def test_a_question_asked_twice_is_not_asked_a_third_time() -> None:
+    same = "How long does each headache last?"
+    chat = Chat(interviewer=FakeInterviewer(questions=[same, same, same, "Never reached?"]))
+
+    replies = [await chat.send("headaches")] + [await chat.send("not sure") for _ in range(2)]
+
+    assert [r.text for r in replies] == [same, same, FINAL_QUESTION]
 
 
 async def test_the_interview_stops_after_the_question_limit() -> None:
@@ -209,9 +219,8 @@ async def test_a_booking_request_asks_what_the_visit_is_for_first() -> None:
 
     assert first.text == BOOKING_START
     case, transcript = chat.interviewer.calls[0]
-    assert case == {}
+    assert case == {"main_problem": "A rash on my arm"}  # the patient's words, not our question
     assert transcript.startswith(f"assistant: {BOOKING_START}")
-    assert chat.interviewer.calls[1][0]["main_problem"] == "A rash on my arm"  # not our question
 
 
 # Booking ---------------------------------------------------------------------------------
@@ -316,7 +325,7 @@ async def test_separate_conversations_do_not_share_anything() -> None:
 
     await second.send("my knee hurts")
 
-    assert second.interviewer.calls[0][0] == {}
+    assert second.interviewer.calls[0][0] == {"main_problem": "my knee hurts"}
     assert first.router.seen[1][1] == ""
 
 

@@ -44,7 +44,7 @@ from coordinator_agent.reply import (
     from_diagnosis,
     report_reply,
 )
-from coordinator_agent.router import Router
+from coordinator_agent.router import Route, Router, is_clinic_request
 from coordinator_agent.scheduling import Scheduling, SchedulingError
 from ragmed_a2a.client import AgentEvent, Progress
 from ragmed_a2a.client import Reply as AgentReply
@@ -137,6 +137,8 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
 
     async def route_node(state: State) -> State:
         route = await router.route(state["message"], history_text(state.get("history", [])))
+        if route.intent == "out_of_scope" and is_clinic_request(state["message"]):
+            route = Route(intent="symptoms", question="")
         update: State = {"intent": route.intent, "question": route.question or state["message"]}
         if route.intent == "symptoms":
             update |= _new_intake()

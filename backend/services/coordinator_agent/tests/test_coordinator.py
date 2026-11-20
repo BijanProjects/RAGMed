@@ -8,6 +8,7 @@ from coordinator_agent.emergency import CRISIS_GUIDANCE, EMERGENCY_GUIDANCE
 from coordinator_agent.executor import AT_CAPACITY
 from coordinator_agent.intake import FINAL_QUESTION, MAX_QUESTIONS
 from coordinator_agent.reply import BOOKING_START, DISCLAIMER, GREETING, OUT_OF_SCOPE
+from coordinator_agent.router import is_clinic_request
 from coordinator_agent.testing import (
     ANSWER,
     FakeDiagnosis,
@@ -337,6 +338,23 @@ async def test_greetings_and_off_topic_get_a_direct_reply(
     assert chat.interviewer.calls == []
     assert reply.text == text
     assert data(reply)["kind"] == kind
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["I want to renew my blood pressure prescription", "Can I get a sick note for work?"],
+)
+async def test_renewals_and_notes_are_never_turned_away(message: str) -> None:
+    chat = Chat(router=FakeRouter(intent="out_of_scope"))
+
+    reply = await chat.send(message)
+
+    assert data(reply)["kind"] != "out_of_scope"
+    assert chat.interviewer.calls
+
+
+def test_ordinary_words_are_not_mistaken_for_a_clinic_request() -> None:
+    assert not is_clinic_request("what's the weather forecast? fill in this information")
 
 
 async def test_separate_conversations_do_not_share_anything() -> None:

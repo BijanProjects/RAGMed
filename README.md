@@ -21,22 +21,23 @@ You need Python 3.12 and about 3 GB of disk space for the models.
 ```bash
 cd backend
 make install          # create .venv, install locked dependencies and git hooks
-make check            # lint, strict type check, 80+ tests: should end with "passed"
+make check            # lint, strict type check, 180+ tests: should end with "passed"
 make install-bench    # add PyTorch and the embedding models' libraries (~1 GB)
+make export-onnx      # build the fast int8 model the server uses (569 MB, about a minute)
 
 make search Q="What are the symptoms of asthma?"
 ```
 
 The first search downloads BGE-M3 (2.3 GB) and embeds the whole knowledge base once (about 10
-minutes on an Apple Silicon GPU). After that, each question takes about 60 ms on CPU:
+minutes on an Apple Silicon GPU). After that, each question takes about 10 ms on CPU:
 
 ```text
 Q: my child has a rash and high fever
-   BAAI/bge-m3 on cpu: 59 ms
-  1. [0.602] susceptibility | Who is at risk for?
+   BAAI/bge-m3 (onnx-int8, cpu): 9 ms
+  1. [0.603] susceptibility | Who is at risk for?
       Measles: Make Sure Your Child Is Protected with MMR Vaccine Measles starts with a fever...
-  2. [0.587] information | What is (are) Respiratory Syncytial Virus Infections?
-  3. [0.582] information | What is (are) Fifth Disease?
+  2. [0.587] information | Do you have information about Common Infant and Newborn Problems
+  3. [0.587] information | What is (are) Respiratory Syncytial Virus Infections?
 ```
 
 ## How it fits together
@@ -52,20 +53,21 @@ flowchart LR
     sched["Scheduling agent<br/>finds and books slots"]
     mcpmed["Medical Knowledge<br/>MCP server"]
     mcpcal["Scheduling<br/>MCP server"]
-    retr["Retrieval library<br/>BGE-M3 embeddings"]
+    retr["Retrieval library<br/>BGE-M3, int8 on CPU"]
+    vs["Vector store interface<br/>Qdrant adapter"]
     kb[("MedQuAD<br/>knowledge base")]
     cal[("Cal.com")]
 
     user --> web -->|A2A| coord
     coord -->|A2A| diag
     coord -->|A2A| sched
-    diag -->|MCP| mcpmed --> retr --> kb
+    diag -->|MCP| mcpmed --> retr --> vs --> kb
     sched -->|MCP| mcpcal --> cal
 
     classDef done fill:#d3f9d8,stroke:#2b8a3e,color:#000
     classDef planned fill:#f1f3f5,stroke:#868e96,color:#000,stroke-dasharray: 4 3
-    class retr,kb done
-    class web,coord,diag,sched,mcpmed,mcpcal,cal planned
+    class diag,mcpmed,retr,vs,kb done
+    class web,coord,sched,mcpcal,cal planned
 ```
 
 Three ideas carry the whole design:
@@ -90,14 +92,19 @@ server). Services import packages; packages never import services.
 RAGMed/
 ├─ backend/                          ALL PYTHON CODE
 │  ├─ packages/                      libraries, each with its own tests/
-│  │  ├─ ragmed_core/                settings, JSON logging, trace ids (shared by every service)
-│  │  └─ ragmed_retrieval/           load MedQuAD, chunk, embed, search, benchmark  ◀ the work so far
-│  ├─ services/                      runnable programs: MCP servers and agents (next phases)
+│  │  ├─ ragmed_core/                settings, logging, trace ids, URL guard, secret encryption
+│  │  ├─ ragmed_retrieval/           load MedQuAD, chunk, embed, search, benchmark, ONNX runtime
+│  │  ├─ ragmed_vectorstores/        one interface over vector databases (Qdrant, in-memory)
+│  │  └─ ragmed_a2a/                 how agents serve and call each other over A2A
+│  ├─ services/                      runnable programs: MCP servers and agents
+│  │  ├─ mcp_medical/                Medical Knowledge MCP server: search tools for the agents
+│  │  └─ diagnosis_agent/            answers medical questions with citations (LangGraph, A2A)
 │  ├─ evals/                         the embedding benchmark
 │  │  ├─ data/                       1,000 frozen test questions
-│  │  ├─ results/                    one JSON file per model and pipeline
+│  │  ├─ results/                    one JSON file per model and pipeline (+ per-query scores)
 │  │  ├─ analysis/                   confidence intervals, scores per question type
-│  │  └─ analysis.py                 the script that produces analysis/
+│  │  ├─ analysis.py                 the script that produces analysis/
+│  │  └─ run_all.sh                  every experiment in one command: make benchmark-all
 │  ├─ data/raw/medquad.csv           the knowledge base (input, never modified)
 │  ├─ data/artifacts/                generated embeddings (git-ignored, rebuilt on demand)
 │  ├─ legacy/                        the original FAISS + Llama prototype, kept for reference
@@ -105,6 +112,7 @@ RAGMed/
 │  ├─ pyproject.toml                 ruff, mypy and pytest settings
 │  └─ Makefile                       every command: make help
 ├─ frontend/                         Next.js web app (not started yet)
+├─ docs/adr/                         architecture decision records: why each big choice was made
 ├─ .github/workflows/ci.yml          lint, type-check and test on every pull request
 └─ README.md                         this file
 ```
@@ -118,6 +126,12 @@ RAGMed/
 | Change or add an embedding model | `MODEL_PRESETS` in [`cli.py`](backend/packages/ragmed_retrieval/src/ragmed_retrieval/cli.py), loaders in [`embedding.py`](backend/packages/ragmed_retrieval/src/ragmed_retrieval/embedding.py) |
 | See how scores are computed | [`metrics.py`](backend/packages/ragmed_retrieval/src/ragmed_retrieval/metrics.py) |
 | See keyword search and reranking | [`hybrid.py`](backend/packages/ragmed_retrieval/src/ragmed_retrieval/hybrid.py) |
+| See how the model runs fast on CPU | [`onnx.py`](backend/packages/ragmed_retrieval/src/ragmed_retrieval/onnx.py) |
+| Connect a different vector database | [`ragmed_vectorstores/`](backend/packages/ragmed_vectorstores/) and its [README](backend/packages/ragmed_vectorstores/README.md) |
+| See how user-supplied URLs and keys are kept safe | [`urlguard.py`](backend/packages/ragmed_core/src/ragmed_core/urlguard.py), [`secrets.py`](backend/packages/ragmed_core/src/ragmed_core/secrets.py) |
+| See the tools the agents will use | [`services/mcp_medical/`](backend/services/mcp_medical/) and its [README](backend/services/mcp_medical/README.md) |
+| See how an answer is produced | [`diagnosis_agent/graph.py`](backend/services/diagnosis_agent/src/diagnosis_agent/graph.py) |
+| Read why a decision was made | [`docs/adr/`](docs/adr/) |
 | Read the raw benchmark numbers | [`backend/evals/results/`](backend/evals/results/) |
 | Change settings, logging or tracing | [`ragmed_core/`](backend/packages/ragmed_core/src/ragmed_core/) |
 | Find a command | `cd backend && make help` |
@@ -133,7 +147,8 @@ on Vercel. The plan's folders map across one to one:
 | Plan | This repository |
 | --- | --- |
 | `packages/ragmed_core`, `packages/ragmed_retrieval` | `backend/packages/…` |
-| `services/coordinator_agent`, `diagnosis_agent`, `scheduling_agent`, `mcp_medical`, `mcp_scheduling` | `backend/services/…` (to be created) |
+| `services/mcp_medical`, `services/diagnosis_agent` | `backend/services/…` |
+| `services/coordinator_agent`, `scheduling_agent`, `mcp_scheduling` | `backend/services/…` (to be created) |
 | `evals/` | `backend/evals/` |
 | `apps/web` | `frontend/` |
 
@@ -269,20 +284,78 @@ flowchart TD
 BGE-M3 is as accurate as Qwen3 and about 25% faster on CPU, which matters because the server has
 no GPU. It also has an MIT licence and supports more than 100 languages. It is now the default
 model (`DEFAULT_MODEL` in [`cli.py`](backend/packages/ragmed_retrieval/src/ragmed_retrieval/cli.py)).
+Full reasoning: [ADR 0001](docs/adr/0001-embedding-model.md).
 
-### Reranking: not decided yet
+### Making it 6× faster on CPU: int8 ONNX
 
-A *reranker* re-reads the top candidates together with the question and reorders them. It is
-usually the biggest single accuracy gain in a RAG pipeline, but it is expensive. On 4 CPU threads:
+The knowledge base only needs embedding once, so that can happen offline on a GPU. On the server,
+only the patient's question is embedded, on CPU. For that step BGE-M3 is exported to
+[ONNX](https://onnxruntime.ai) with its weights stored as 8-bit integers instead of 32-bit
+floats ([`onnx.py`](backend/packages/ragmed_retrieval/src/ragmed_retrieval/onnx.py)):
 
-| Reranker | Rerank 40 passages | Rerank 20 passages |
-| --- | ---: | ---: |
-| bge-reranker-v2-m3 (568M, same size class as Qwen3-Reranker-0.6B) | 6.9 s | 3.5 s |
-| ms-marco-MiniLM-L6 cross-encoder (23M) | 0.7 s | — |
+```mermaid
+flowchart LR
+    subgraph offline["Once, offline (GPU)"]
+        A["19,020 passages"] --> B["BGE-M3<br/>full precision"] --> C[("Passage vectors")]
+    end
+    subgraph server["Every question, on the server (CPU)"]
+        Q["Patient's question"] --> D["BGE-M3<br/>int8 ONNX, 9 ms"] --> E["Closest passages"]
+    end
+    C --> E
+```
 
-A 0.6B reranker is too slow for a CPU server. The options are a small reranker over fewer
-passages, a reranking API, or no reranker; the next experiment measures how much accuracy each
-adds on MedQuAD.
+| Question encoder (4 CPU threads) | nDCG@10 | Recall@5 | Time per question | Model size | Needs PyTorch |
+| --- | ---: | ---: | ---: | ---: | :---: |
+| PyTorch, full precision | 0.751 | 0.856 | 58 ms | 2.3 GB | yes |
+| ONNX, full precision | 0.751 | 0.856 | 22 ms | 2.3 GB | no |
+| **ONNX, int8** ✅ | **0.756** | 0.854 | **9–10 ms** | **569 MB** | **no** |
+
+The int8 model is 6× faster and 4× smaller with no loss of accuracy (the +0.5 is within noise).
+The server no longer needs PyTorch, which keeps its image about 1 GB smaller.
+
+### Reranking: tested, not used
+
+A *reranker* re-reads the top candidates together with the question and reorders them. It can
+add a lot of accuracy, but it runs a model over every candidate for every question. Four setups
+were tested on top of BGE-M3, each reranking its top candidates:
+
+```mermaid
+xychart-beta
+    title "nDCG@10 with each reranker (BGE-M3 alone = 0.751)"
+    x-axis ["bge-reranker-base", "BGE-M3 alone", "MiniLM, top 40", "MiniLM, top 20", "bge-reranker-v2-m3"]
+    y-axis "nDCG@10" 0.5 --> 0.85
+    bar [0.591, 0.751, 0.765, 0.766, 0.803]
+```
+
+| Reranker on top of BGE-M3 | Size | nDCG@10 | Recall@5 | Hit@1 | Change | Time per question, 4 CPU threads |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| None | — | 0.751 | 0.856 | 0.588 | — | 0 |
+| ms-marco-MiniLM-L6, top 20 | 23M | 0.766 | 0.863 | 0.617 | +1.6 (real) | 0.3 s |
+| ms-marco-MiniLM-L6, top 40 | 23M | 0.765 | 0.861 | 0.616 | +1.5 (real) | 0.6 s |
+| bge-reranker-base, top 40 | 278M | 0.591 | 0.708 | 0.372 | **−16.0** (real) | 2.2 s |
+| bge-reranker-v2-m3, top 40 | 568M | **0.803** | **0.886** | **0.681** | **+5.2** (real) | 6.9 s (3.5 s for top 20) |
+
+- **The big reranker is genuinely better** (+5 points), but at 3.5–7 seconds per question on
+  the Apple M4 Pro's CPU it would take roughly 10–20 seconds on the Oracle server. Too slow.
+- **The small one barely helps where it matters.** The language model reads the top 5 passages,
+  and MiniLM moves Recall@5 from 0.856 to 0.863.
+- **bge-reranker-base made results much worse.** Its scores were checked by hand and are not
+  inverted; it seems to reward passages about the right disease but the wrong kind of question
+  (symptoms instead of treatment), which BGE-M3 already separates well.
+
+**Decision: no reranker.** The Diagnosis agent already checks whether the passages answer the
+question and searches again when they do not, which covers the same risk at no extra cost.
+
+### Final choice
+
+| | |
+| --- | --- |
+| Embedding model | **BGE-M3** |
+| How it runs on the server | int8 ONNX, CPU only, about 10 ms per question |
+| Search | Dense only (no keyword fusion, no reranker) |
+| Accuracy on the test set | nDCG@10 0.756, Recall@5 0.854, Hit@1 0.606 |
+
+The experiments are closed. To rerun every one of them: `cd backend && make benchmark-all`.
 
 ### Caveats
 
@@ -293,8 +366,11 @@ adds on MedQuAD.
   a patient says "my chest has felt tight for three days". The agent will rewrite the conversation
   into a search query first, which narrows this gap. A small hand-written set of patient-style
   questions would make the test more realistic.
-- **Not run yet:** EmbeddingGemma (needs a Hugging Face licence acceptance), the larger Qwen3 4B/8B
-  models as an accuracy ceiling, and timing on the Oracle server itself.
+- **Not run:** EmbeddingGemma (needs a Hugging Face licence acceptance) and the larger Qwen3
+  4B/8B models. The choice above was made without them on purpose: a model that is accurate
+  and fast enough on CPU was the goal, not the most accurate model at any cost.
+- **Timing on the Oracle server itself** comes with the deployment; the CPU numbers above are
+  from an Apple M4 Pro limited to 4 threads.
 - **Precision check:** Qwen3 was first run in bfloat16 by accident, then re-run in float32. The
   score moved by 0.1 points, so precision did not affect the comparison.
 
@@ -315,9 +391,9 @@ are saved, so re-runs take seconds.
 
 ```mermaid
 flowchart LR
-    P1["1 · Tooling<br/>and CI"]:::done --> P2["2 · Retrieval and<br/>benchmark"]:::now
-    P2 --> P3["3–5 · Vector stores<br/>and MCP servers"]:::todo
-    P3 --> P4["6–8 · The three<br/>agents over A2A"]:::todo
+    P1["1 · Tooling<br/>and CI"]:::done --> P2["2 · Retrieval and<br/>benchmark"]:::done
+    P2 --> P3["3–5 · Vector stores<br/>and MCP servers"]:::now
+    P3 --> P4["6–8 · The three<br/>agents over A2A"]:::now
     P4 --> P5["9–11 · Monitoring,<br/>web app, accounts"]:::todo
     P5 --> P6["12–15 · Oracle VM,<br/>CI/CD, launch"]:::todo
 
@@ -327,11 +403,13 @@ flowchart LR
 ```
 
 - [x] Workspace, tooling and CI
-- [ ] Ingestion pipeline and embedding benchmark *(nearly done: reranking and CPU speed-up left)*
-- [ ] Vector store connectors with shared contract tests
-- [ ] Medical Knowledge MCP server
+- [x] Ingestion pipeline and embedding benchmark
+- [ ] Vector store connectors with shared contract tests *(Qdrant and in-memory done; pgvector,
+  Weaviate and Pinecone next)*
+- [x] Medical Knowledge MCP server
 - [ ] Scheduling MCP server (Cal.com)
-- [ ] Diagnosis, Scheduling and Care Coordinator agents over A2A (Groq models)
+- [ ] Diagnosis, Scheduling and Care Coordinator agents over A2A (Groq models) *(Diagnosis agent
+  working; Care Coordinator next)*
 - [ ] Observability and evaluation suite
 - [ ] Web frontend
 - [ ] Infrastructure as code and continuous deployment (Oracle Cloud Always Free VM)

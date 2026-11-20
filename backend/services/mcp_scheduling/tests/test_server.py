@@ -5,9 +5,9 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
-from mcp_scheduling.app import SchedulingSettings, create_server
+from mcp_scheduling.app import SchedulingSettings, create_server, make_provider
 from mcp_scheduling.providers import InMemoryProvider
-from mcp_scheduling.server import MAX_BOOKINGS_PER_DAY, build_server
+from mcp_scheduling.server import MAX_BOOKINGS_PER_DAY, attendee_email, build_server
 from mcp_scheduling.store import AppointmentStore
 from ragmed_core.settings import Environment
 
@@ -192,3 +192,14 @@ def test_production_requires_service_tokens(tmp_path: Any) -> None:
 
     with pytest.raises(RuntimeError, match="RAGMED_SERVICE_TOKENS"):
         create_server(settings, InMemoryProvider())
+
+
+def test_bookings_use_a_tagged_clinic_address_never_the_patients() -> None:
+    assert attendee_email("RC-7K2Q9F", None) == "patient-rc-7k2q9f@example.com"
+    assert attendee_email("RC-7K2Q9F", "clinic@gmail.com") == "clinic+rc-7k2q9f@gmail.com"
+    assert attendee_email("RC-7K2Q9F", "clinic+old@gmail.com") == "clinic+rc-7k2q9f@gmail.com"
+
+
+async def test_calcom_mode_needs_a_clinic_inbox() -> None:
+    with pytest.raises(RuntimeError, match="RAGMED_CLINIC_EMAIL"):
+        await make_provider(SchedulingSettings(calendar="calcom", clinic_email=None))

@@ -34,11 +34,19 @@ class SchedulingSettings(CoreSettings):
     appointments_db: Path = Path("data/artifacts/clinic/appointments.db")
     service_tokens: dict[str, SecretStr] = Field(default_factory=dict)
     clinician_tokens: dict[str, SecretStr] = Field(default_factory=dict)
+    # An inbox the clinic owns. Cal.com requires a deliverable attendee address, and patients
+    # are anonymous, so bookings go to clinic+<reference>@domain.
+    clinic_email: str | None = None
 
 
 async def make_provider(settings: SchedulingSettings) -> SchedulingProvider:
     if settings.calendar == "memory":
         return InMemoryProvider(time_zone=settings.clinic_time_zone)
+    if not settings.clinic_email or "@" not in settings.clinic_email:
+        raise RuntimeError(
+            "RAGMED_CLINIC_EMAIL must be an inbox the clinic owns: Cal.com refuses undeliverable "
+            "attendee addresses, and bookings are made as clinic+<reference>@domain"
+        )
     key = ProviderKeys().cal_api_key
     if key is None:
         raise RuntimeError("CAL_API_KEY is not set; add it to .env or use RAGMED_CALENDAR=memory")
@@ -60,4 +68,5 @@ def create_server(settings: SchedulingSettings, provider: SchedulingProvider) ->
         time_zone=settings.clinic_time_zone,
         auth=ServiceTokenVerifier(tokens) if tokens else None,
         clinician_tokens={n: t.get_secret_value() for n, t in settings.clinician_tokens.items()},
+        clinic_email=settings.clinic_email if settings.calendar != "memory" else None,
     )

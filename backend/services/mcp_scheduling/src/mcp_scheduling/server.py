@@ -28,6 +28,21 @@ MAX_BOOKINGS_PER_DAY = 2
 SLOTS_PER_DAY = 4
 ATTENDEE_DOMAIN = "example.com"  # reserved for examples (RFC 2606): nothing is ever delivered
 
+
+def attendee_email(reference: str, clinic_email: str | None) -> str:
+    """The address a booking is made under. Patients are anonymous, so it is never theirs.
+
+    Cal.com refuses undeliverable addresses, so with a clinic inbox each booking uses a
+    plus-address tagged with its reference (clinic+rc-7k2q9f@domain), which delivers to the
+    clinic. Without one (the in-memory calendar), a reserved example.com address is used.
+    """
+    tag = reference.lower()
+    if not clinic_email:
+        return f"patient-{tag}@{ATTENDEE_DOMAIN}"
+    local, _, domain = clinic_email.partition("@")
+    return f"{local.split('+', 1)[0]}+{tag}@{domain}"
+
+
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
 WRITES = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=True)
 
@@ -62,6 +77,7 @@ def build_server(  # noqa: PLR0915 - one closure per tool, next to the data it u
     time_zone: str,
     auth: TokenVerifier | None = None,
     clinician_tokens: dict[str, str] | None = None,
+    clinic_email: str | None = None,
 ) -> FastMCP:
     zone = ZoneInfo(time_zone)
     mcp = FastMCP(
@@ -131,7 +147,7 @@ def build_server(  # noqa: PLR0915 - one closure per tool, next to the data it u
         physician = physician_for(kind, begins.isoformat())
         attendee = Attendee(
             name=f"Patient {reference}",
-            email=f"patient-{reference.lower()}@{ATTENDEE_DOMAIN}",
+            email=attendee_email(reference, clinic_email),
             time_zone=time_zone,
         )
         summary = str(report.get("summary", ""))[:900]

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Shared settings, logging and trace context for RAGMed services."
 requires-python = ">=3.12"
 dependencies = [
+  "cryptography>=43",
   "pydantic>=2.9,<3",
   "pydantic-settings>=2.6,<3",
   "structlog>=24.4",

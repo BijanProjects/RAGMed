@@ -21,9 +21,14 @@ coverage.xml
 htmlcov/
 
 # Data artifacts (rebuilt by the ingestion pipeline)
-data/artifacts/
-data/processed/
+**/data/artifacts/
+**/data/processed/
 *.index
+
+# Frontend
+node_modules/
+.next/
+.vercel/
 
 # Editors and OS
 .DS_Store

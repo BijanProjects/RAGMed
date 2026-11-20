@@ -14,7 +14,7 @@ venv: ## Create the virtual environment
 
 install: venv ## Install locked dev dependencies and git hooks
 	$(BIN)/pip install --quiet -r requirements/dev.txt
-	$(BIN)/pre-commit install
+	cd .. && backend/$(BIN)/pre-commit install
 
 lock: venv ## Re-resolve requirements/dev.txt from requirements/dev.in
 	$(BIN)/pip-compile --quiet --strip-extras --no-emit-index-url \

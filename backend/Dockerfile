@@ -19,6 +19,8 @@ RUN pip install -r requirements/prod.txt
 
 USER ragmed
 # Listen on the container network; only Caddy is reachable from the internet.
-ENV RAGMED_HOST=0.0.0.0 \
+# HOME=/tmp: the server may run this image as a user id that has no home folder.
+ENV HOME=/tmp \
+    RAGMED_HOST=0.0.0.0 \
     RAGMED_ENVIRONMENT=production \
     RAGMED_LOG_LEVEL=INFO

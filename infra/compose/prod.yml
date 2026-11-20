@@ -10,6 +10,9 @@ x-backend: &backend
   build: ../../backend
   image: ragmed-backend
   restart: unless-stopped
+  # Run as the owner of the data folder (on Oracle's Ubuntu image that is uid 1001, not 1000),
+  # so the services can write their SQLite and index lock files.
+  user: "${APP_UID:-1000}:${APP_GID:-1000}"
   volumes: ["${DATA_DIR:-../../backend/data}:/app/data"]
   logging: &logging
     driver: json-file

@@ -63,7 +63,9 @@ DATA="$ROOT/backend/data"
 "${RSYNC[@]}" "$DATA/artifacts/onnx/" "ubuntu@$IP:/opt/ragmed/data/artifacts/onnx/"
 "${RSYNC[@]}" "$DATA/artifacts/qdrant/" "ubuntu@$IP:/opt/ragmed/data/artifacts/qdrant/"
 scp -q -i "$KEY" "$ENV_FILE" "ubuntu@$IP:/opt/ragmed/.env.production"
-"${SSH[@]}" "chmod 600 /opt/ragmed/.env.production"
+# The containers run as the owner of the data folder (see APP_UID in prod.yml).
+"${SSH[@]}" "chmod 600 /opt/ragmed/.env.production && \
+  printf 'APP_UID=%s\nAPP_GID=%s\n' \$(id -u) \$(id -g) >> /opt/ragmed/.env.production"
 
 echo "  building and starting (first time ~5 minutes)"
 "${SSH[@]}" "cd /opt/ragmed/app && docker compose -f infra/compose/prod.yml \

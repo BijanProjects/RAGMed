@@ -20,7 +20,11 @@ install-bench: install ## Add the embedding benchmark dependencies (PyTorch, ~1 
 	$(BIN)/pip install --quiet -r requirements/bench.txt
 
 lock: venv ## Re-pin requirements/*.txt from requirements/*.in
-	for name in dev bench; do \
+	@# prod.txt reuses dev.txt's versions; pip refuses editable lines in a constraints file.
+	$(BIN)/pip-compile --quiet --strip-extras --no-emit-index-url \
+		--output-file requirements/dev.txt requirements/dev.in
+	grep -v '^-e ' requirements/dev.txt > requirements/constraints.txt
+	for name in dev bench prod; do \
 		$(BIN)/pip-compile --quiet --strip-extras --no-emit-index-url \
 			--output-file requirements/$$name.txt requirements/$$name.in && \
 		sed -i.bak -E 's#^-e file:///.*/backend/(packages|services)/#-e ./\1/#' requirements/$$name.txt && \

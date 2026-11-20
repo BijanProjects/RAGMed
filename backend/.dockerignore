@@ -1,0 +1,11 @@
+.venv
+data
+legacy
+evals
+**/__pycache__
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+**/tests
+**/*.egg-info
+.coverage*

@@ -1,0 +1,34 @@
+# HTTPS for the backend, with a free Let's Encrypt certificate that Caddy renews by itself.
+# Only two things are public, and both need a token: the Care Coordinator (the web app's chat)
+# and the clinician's appointment list. The Diagnosis agent and both MCP servers stay private.
+{$API_HOST} {
+	request_body {
+		max_size 64KB
+	}
+
+	handle /clinician/* {
+		reverse_proxy mcp-scheduling:9002
+	}
+
+	handle /healthz {
+		reverse_proxy coordinator-agent:8000
+	}
+
+	handle {
+		reverse_proxy coordinator-agent:8000 {
+			# Replies stream while the agents work.
+			flush_interval -1
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

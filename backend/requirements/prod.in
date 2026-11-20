@@ -1,0 +1,12 @@
+# Production image: the services and the libraries they run on, nothing for development.
+# Pinned to the same versions as dev.txt. Compile with `make lock`.
+-c constraints.txt
+-e packages/ragmed_core[valkey]
+-e packages/ragmed_retrieval[onnx]
+-e packages/ragmed_vectorstores[qdrant]
+-e packages/ragmed_a2a
+-e packages/ragmed_llm
+-e services/mcp_medical
+-e services/mcp_scheduling
+-e services/diagnosis_agent
+-e services/coordinator_agent

@@ -35,7 +35,7 @@ if [[ ! -f $ENV_FILE ]]; then
     for name in TOKEN_MEDICAL TOKEN_DIAGNOSIS TOKEN_SCHEDULING TOKEN_CLINICIAN TOKEN_WEB SESSION_SECRET; do
       echo "$name=$(secret)"
     done
-    echo "CLINICIAN_ACCESS_CODE=$(python3 -c 'import secrets; print(secrets.token_hex(6))')"
+    echo "CLINICIAN_ACCESS_CODE=$(secret)"
   } > "$ENV_FILE"
   echo "  created .env.production with new secrets"
 fi

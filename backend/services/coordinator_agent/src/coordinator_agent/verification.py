@@ -19,6 +19,10 @@ CODE_MINUTES = 10
 MAX_ATTEMPTS = 5
 CODES_PER_EMAIL_PER_HOUR = 3
 CODES_PER_IP_PER_HOUR = 6
+# Gmail allows about 500 emails a day; staying far below keeps the clinic's account in good
+# standing even if someone requests codes for many addresses from many IP addresses.
+CODES_PER_CLINIC_PER_DAY = 100
+DAY = 86400
 HOUR = 3600
 EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
 CODE = re.compile(r"^\d{6}$")
@@ -78,6 +82,8 @@ async def send_limit(limiter: RateLimiter, ip: str, email: str) -> str | None:
         return "Too many codes were sent to that address. Please try again in an hour."
     if not (await limiter.hit(f"code:ip:{ip}", CODES_PER_IP_PER_HOUR, HOUR)).allowed:
         return "Too many codes were requested. Please try again in an hour."
+    if not (await limiter.hit("code:clinic", CODES_PER_CLINIC_PER_DAY, DAY)).allowed:
+        return "Online booking is closed for today. Please come back tomorrow."
     return None
 
 

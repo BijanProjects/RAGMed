@@ -1,6 +1,7 @@
 # HTTPS for the backend, with a free Let's Encrypt certificate that Caddy renews by itself.
-# Only two things are public, and both need a token: the Care Coordinator (the web app's chat)
-# and the clinician's appointment list. The Diagnosis agent and both MCP servers stay private.
+# Only three paths are public: /a2a (the Care Coordinator, token required), /clinician/*
+# (the clinician's appointment list, token required) and /healthz. The Diagnosis agent and both
+# MCP servers stay private.
 {$API_HOST} {
 	request_body {
 		max_size 64KB
@@ -14,11 +15,16 @@
 		reverse_proxy coordinator-agent:8000
 	}
 
-	handle {
+	handle /a2a* {
 		reverse_proxy coordinator-agent:8000 {
 			# Replies stream while the agents work.
 			flush_interval -1
 		}
+	}
+
+	# Nothing else is public: not the agent card, not the MCP endpoints.
+	handle {
+		respond 404
 	}
 
 	header {

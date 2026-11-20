@@ -2,9 +2,9 @@
   "model": "Qwen/Qwen3-Embedding-0.6B",
   "chunks": 19020,
   "dimensions": 1024,
-  "index_seconds": 1184.5,
-  "query_p50_ms": 23.5,
-  "query_p95_ms": 29.3,
+  "index_seconds": 0.0,
+  "query_p50_ms": 23.1,
+  "query_p95_ms": 25.4,
   "scores": {
     "queries": 1000,
     "hit_at_1": 0.575,
@@ -14,5 +14,7 @@
     "mrr": 0.7001449693880798
   },
   "pipeline": "dense",
-  "reranker": null
+  "reranker": null,
+  "rerank_depth": null,
+  "runtime": "torch"
 }

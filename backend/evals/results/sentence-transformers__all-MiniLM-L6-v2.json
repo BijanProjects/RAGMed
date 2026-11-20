@@ -2,9 +2,9 @@
   "model": "sentence-transformers/all-MiniLM-L6-v2",
   "chunks": 19020,
   "dimensions": 384,
-  "index_seconds": 35.1,
-  "query_p50_ms": 3.9,
-  "query_p95_ms": 111.2,
+  "index_seconds": 0.0,
+  "query_p50_ms": 3.6,
+  "query_p95_ms": 6.3,
   "scores": {
     "queries": 1000,
     "hit_at_1": 0.418,
@@ -12,5 +12,9 @@
     "recall_at_10": 0.8375246031746032,
     "ndcg_at_10": 0.6244757799441131,
     "mrr": 0.5652190638887876
-  }
+  },
+  "pipeline": "dense",
+  "reranker": null,
+  "rerank_depth": null,
+  "runtime": "torch"
 }

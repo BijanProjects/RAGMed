@@ -1,0 +1,20 @@
+{
+  "model": "BAAI/bge-m3",
+  "chunks": 19020,
+  "dimensions": 1024,
+  "index_seconds": 0.0,
+  "query_p50_ms": 2125.3,
+  "query_p95_ms": 2298.9,
+  "scores": {
+    "queries": 1000,
+    "hit_at_1": 0.681,
+    "recall_at_5": 0.886318253968254,
+    "recall_at_10": 0.9076388888888889,
+    "ndcg_at_10": 0.8028321530604717,
+    "mrr": 0.7730747153488382
+  },
+  "pipeline": "dense+rerank",
+  "reranker": "BAAI/bge-reranker-v2-m3",
+  "rerank_depth": 40,
+  "runtime": "torch"
+}

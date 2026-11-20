@@ -2,9 +2,9 @@
   "model": "BAAI/bge-m3",
   "chunks": 19020,
   "dimensions": 1024,
-  "index_seconds": 620.6,
+  "index_seconds": 0.0,
   "query_p50_ms": 19.2,
-  "query_p95_ms": 125.7,
+  "query_p95_ms": 25.1,
   "scores": {
     "queries": 1000,
     "hit_at_1": 0.588,
@@ -14,5 +14,7 @@
     "mrr": 0.7103237584095451
   },
   "pipeline": "dense",
-  "reranker": null
+  "reranker": null,
+  "rerank_depth": null,
+  "runtime": "torch"
 }

@@ -3,8 +3,8 @@
   "chunks": 19020,
   "dimensions": 384,
   "index_seconds": 0.0,
-  "query_p50_ms": 3.9,
-  "query_p95_ms": 7.1,
+  "query_p50_ms": 4.0,
+  "query_p95_ms": 7.3,
   "scores": {
     "queries": 1000,
     "hit_at_1": 0.399,
@@ -14,5 +14,7 @@
     "mrr": 0.5537217870453807
   },
   "pipeline": "hybrid",
-  "reranker": null
+  "reranker": null,
+  "rerank_depth": null,
+  "runtime": "torch"
 }

@@ -4,7 +4,7 @@
   "dimensions": 1024,
   "index_seconds": 0.0,
   "query_p50_ms": 19.2,
-  "query_p95_ms": 24.5,
+  "query_p95_ms": 25.3,
   "scores": {
     "queries": 1000,
     "hit_at_1": 0.463,
@@ -14,5 +14,7 @@
     "mrr": 0.6194585127462254
   },
   "pipeline": "hybrid",
-  "reranker": null
+  "reranker": null,
+  "rerank_depth": null,
+  "runtime": "torch"
 }

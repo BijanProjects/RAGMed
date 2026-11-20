@@ -26,7 +26,7 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["packages"]
-mypy_path = ["packages/ragmed_core/src"]
+mypy_path = ["packages/ragmed_core/src", "packages/ragmed_retrieval/src"]
 explicit_package_bases = true
 exclude = ["^legacy/"]
 warn_unreachable = true
@@ -38,13 +38,13 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["packages"]
-pythonpath = ["packages/ragmed_core/src"]
+pythonpath = ["packages/ragmed_core/src", "packages/ragmed_retrieval/src"]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
 filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
-source = ["ragmed_core"]
+source = ["ragmed_core", "ragmed_retrieval"]
 
 [tool.coverage.report]
 fail_under = 80

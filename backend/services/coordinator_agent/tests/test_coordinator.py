@@ -1,12 +1,15 @@
+import time
 from typing import Any
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
-from coordinator_agent.app import CoordinatorSettings, create_coordinator_app
+from coordinator_agent.app import CoordinatorSettings, create_coordinator_app, make_mailer
 from coordinator_agent.emergency import CRISIS_GUIDANCE, EMERGENCY_GUIDANCE
 from coordinator_agent.executor import AT_CAPACITY
 from coordinator_agent.intake import FINAL_QUESTION, MAX_QUESTIONS
+from coordinator_agent.mailer import RecordingMailer, SmtpMailer, code_email
 from coordinator_agent.reply import BOOKING_START, DISCLAIMER, GREETING, OUT_OF_SCOPE
 from coordinator_agent.router import is_clinic_request
 from coordinator_agent.testing import (
@@ -35,17 +38,20 @@ class Chat:
         interviewer: FakeInterviewer | None = None,
         diagnosis: FakeDiagnosis | None = None,
         scheduling: FakeScheduling | None = None,
+        mailer: RecordingMailer | None = None,
     ) -> None:
         self.router = router or FakeRouter()
         self.interviewer = interviewer or FakeInterviewer()
         self.diagnosis = diagnosis or FakeDiagnosis()
         self.scheduling = scheduling or FakeScheduling()
+        self.mailer = mailer or RecordingMailer()
         app = create_coordinator_app(
             CoordinatorSettings(public_url=BASE),
             router=self.router,
             interviewer=self.interviewer,
             diagnosis=self.diagnosis,
             scheduling=self.scheduling,
+            mailer=self.mailer,
         )
         self.agent = RemoteAgent(BASE, transport=httpx.ASGITransport(app=app))
         self.context_id: str | None = None
@@ -67,6 +73,12 @@ class Chat:
         final = await self.send("7 out of 10")
         assert final.text == FINAL_QUESTION
         return await self.send("No, that's everything")
+
+    async def book(self, start: str, **extra: Any) -> Reply:
+        """Choose a time, then enter the code that was emailed."""
+        sent = await self.send(action={"type": "book", "start": start, **PATIENT, **extra})
+        assert data(sent)["kind"] == "verify_email", sent.text
+        return await self.send(action={"type": "confirm", "code": self.mailer.sent[-1][1]})
 
 
 def data(reply: Reply) -> dict[str, Any]:
@@ -234,7 +246,7 @@ async def test_show_times_then_book_sends_the_report_to_the_physician() -> None:
 
     slots = await chat.send(action={"type": "show_slots"})
     start = data(slots)["slots"][1]["start"]
-    booked = await chat.send(action={"type": "book", "start": start, **PATIENT})
+    booked = await chat.book(start)
 
     assert data(slots)["kind"] == "slots"
     assert chat.scheduling.searches == [("Neurology", 30)]
@@ -257,14 +269,7 @@ async def test_the_patient_can_choose_a_general_physician_instead() -> None:
     await chat.interview_to_report()
 
     slots = await chat.send(action={"type": "show_slots", "clinician_type": "General physician"})
-    await chat.send(
-        action={
-            "type": "book",
-            "start": SLOT_START,
-            "clinician_type": "General physician",
-            **PATIENT,
-        }
-    )
+    await chat.book(SLOT_START, clinician_type="General physician")
 
     assert chat.scheduling.searches == [("General physician", 30)]
     assert data(slots)["offer"]["clinician_type"] == "General physician"
@@ -287,7 +292,7 @@ async def test_scheduling_problems_are_shown_plainly() -> None:
     chat = Chat(scheduling=FakeScheduling(error="That time is no longer available."))
     await chat.interview_to_report()
 
-    reply = await chat.send(action={"type": "book", "start": SLOT_START, **PATIENT})
+    reply = await chat.book(SLOT_START)
 
     assert reply.text == "That time is no longer available."
 
@@ -299,7 +304,121 @@ async def test_booking_needs_the_patients_name_and_email() -> None:
     reply = await chat.send(action={"type": "book", "start": SLOT_START, "name": "Alex"})
 
     assert chat.scheduling.bookings == []
-    assert "name and email" in reply.text
+    assert chat.mailer.sent == []
+    assert "name and a valid email" in reply.text
+
+
+async def test_choosing_a_time_emails_a_code_and_books_nothing_yet() -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+
+    reply = await chat.send(action={"type": "book", "start": SLOT_START, **PATIENT})
+
+    ((to, code),) = chat.mailer.sent
+    assert to == "alex@example.org"
+    assert len(code) == 6
+    assert code.isdigit()
+    assert code not in reply.text  # the code is only ever in the email
+    assert data(reply)["kind"] == "verify_email"
+    assert data(reply)["verification"] == {
+        "email": "alex@example.org",
+        "start": SLOT_START,
+        "clinician_type": "Neurology",
+        "minutes": 10,
+    }
+    assert chat.scheduling.bookings == []
+
+
+async def test_a_wrong_code_books_nothing_and_tries_run_out() -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+    await chat.send(action={"type": "book", "start": SLOT_START, **PATIENT})
+    right = chat.mailer.sent[0][1]
+    wrong = "000000" if right != "000000" else "111111"
+
+    first = await chat.send(action={"type": "confirm", "code": wrong})
+    for _ in range(4):
+        last = await chat.send(action={"type": "confirm", "code": wrong})
+    after = await chat.send(action={"type": "confirm", "code": right})
+
+    assert "4 tries left" in first.text
+    assert "no tries are left" in last.text
+    assert "expired" in after.text  # even the right code no longer works
+    assert chat.scheduling.bookings == []
+
+
+async def test_a_new_code_replaces_the_old_one() -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+    await chat.send(action={"type": "book", "start": SLOT_START, **PATIENT})
+    old = chat.mailer.sent[0][1]
+
+    await chat.send(action={"type": "resend"})
+    new = chat.mailer.sent[1][1]
+    if old != new:
+        refused = await chat.send(action={"type": "confirm", "code": old})
+        assert data(refused)["kind"] == "verify_email"
+    booked = await chat.send(action={"type": "confirm", "code": new})
+
+    assert data(booked)["kind"] == "booked"
+    assert chat.scheduling.bookings[0]["patient_email"] == "alex@example.org"
+
+
+async def test_the_booking_uses_the_verified_details_not_what_is_sent_later() -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+    await chat.send(action={"type": "book", "start": SLOT_START, **PATIENT})
+
+    await chat.send(
+        action={"type": "confirm", "code": chat.mailer.sent[0][1], "email": "other@example.org"}
+    )
+
+    assert chat.scheduling.bookings[0]["patient_email"] == "alex@example.org"
+
+
+async def test_confirming_without_choosing_a_time_is_refused() -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+
+    reply = await chat.send(action={"type": "confirm", "code": "123456"})
+
+    assert "choose a time first" in reply.text
+    assert chat.scheduling.bookings == []
+
+
+async def test_codes_to_one_address_are_limited() -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+
+    for _ in range(3):
+        await chat.send(action={"type": "book", "start": SLOT_START, **PATIENT})
+    refused = await chat.send(action={"type": "resend"})
+
+    assert len(chat.mailer.sent) == 3
+    assert "Too many codes" in refused.text
+
+
+async def test_an_email_that_cannot_be_sent_is_explained() -> None:
+    chat = Chat(mailer=RecordingMailer(error="That email address was refused. Please check it."))
+    await chat.interview_to_report()
+
+    reply = await chat.send(action={"type": "book", "start": SLOT_START, **PATIENT})
+
+    assert reply.text == "That email address was refused. Please check it."
+    assert data(reply)["kind"] == "no_answer"
+
+
+async def test_an_expired_code_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+    await chat.send(action={"type": "book", "start": SLOT_START, **PATIENT})
+    later = time.time() + 11 * 60
+    monkeypatch.setattr(time, "time", lambda: later)
+
+    reply = await chat.send(action={"type": "confirm", "code": chat.mailer.sent[0][1]})
+
+    assert "expired" in reply.text
+    assert chat.scheduling.bookings == []
 
 
 async def test_booking_without_a_report_is_refused() -> None:
@@ -404,3 +523,35 @@ def test_production_requires_service_tokens() -> None:
             diagnosis=FakeDiagnosis(),
             scheduling=FakeScheduling(),
         )
+
+
+def test_production_requires_an_email_account() -> None:
+    settings = CoordinatorSettings(
+        environment=Environment.PRODUCTION, service_tokens={"web": SecretStr("a" * 32)}
+    )
+
+    with pytest.raises(RuntimeError, match="RAGMED_SMTP_PASSWORD"):
+        make_mailer(settings)
+
+
+def test_smtp_settings_choose_the_smtp_mailer() -> None:
+    settings = CoordinatorSettings(
+        smtp_username="clinic@example.org", smtp_password=SecretStr("test-only")
+    )
+
+    mailer = make_mailer(settings)
+
+    assert isinstance(mailer, SmtpMailer)
+    assert (mailer.host, mailer.port, mailer.sender) == (
+        "smtp.gmail.com",
+        587,
+        "clinic@example.org",
+    )
+
+
+def test_the_email_says_what_the_code_is_for_and_to_ignore_it_otherwise() -> None:
+    body = code_email("482913", 10)
+
+    assert "Your verification code for RAGMed Clinic is" in body
+    assert "482913" in body
+    assert "If you did not ask to book a visit, please ignore this message" in body

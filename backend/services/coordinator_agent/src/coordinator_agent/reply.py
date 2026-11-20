@@ -14,6 +14,7 @@ ReplyKind = Literal[
     "question",
     "report",
     "slots",
+    "verify_email",
     "booked",
     "answer",
     "no_answer",
@@ -72,6 +73,7 @@ class Reply(BaseModel):
     offer: Offer | None = None
     slots: list[dict[str, Any]] = []
     appointment: dict[str, Any] | None = None
+    verification: dict[str, Any] | None = None  # the booking waiting for its email code
 
 
 def _sources(data: dict[str, Any]) -> list[Source]:

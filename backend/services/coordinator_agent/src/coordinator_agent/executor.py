@@ -26,7 +26,7 @@ FAILED = "Something went wrong on our side. Please try again."
 ROUTING = "Reading your message"
 
 
-ACTIONS = {"show_slots", "book"}
+ACTIONS = {"show_slots", "book", "resend", "confirm"}
 
 
 def read_action(context: RequestContext) -> dict[str, Any] | None:
@@ -36,7 +36,7 @@ def read_action(context: RequestContext) -> dict[str, Any] | None:
     for data in get_data_parts(context.message.parts):
         action = data.get("action") if isinstance(data, dict) else None
         if isinstance(action, dict) and action.get("type") in ACTIONS:
-            fields = ("type", "start", "clinician_type", "name", "email")
+            fields = ("type", "start", "clinician_type", "name", "email", "code")
             return {k: v for k, v in action.items() if k in fields}
     return None
 

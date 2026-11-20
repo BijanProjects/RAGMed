@@ -9,6 +9,9 @@
                           └ greeting / off-topic ─▶ canned
     every path ends in remember → END
 
+Booking takes two steps: choosing a time emails a one-time code to the patient, and the visit is
+booked only once that code is entered (see verification.py).
+
 Emergency screening runs on every message, including mid-interview. Conversation state is saved
 per thread (the A2A context id).
 """
@@ -33,6 +36,7 @@ from coordinator_agent.intake import (
     quick_replies,
 )
 from coordinator_agent.limits import Limits, booking_limit
+from coordinator_agent.mailer import ConsoleMailer, Mailer, MailError
 from coordinator_agent.reply import (
     BOOKING_START,
     DISCLAIMER,
@@ -46,6 +50,18 @@ from coordinator_agent.reply import (
 )
 from coordinator_agent.router import Route, Router, is_clinic_request
 from coordinator_agent.scheduling import Scheduling, SchedulingError
+from coordinator_agent.verification import (
+    CODE_MINUTES,
+    EMAIL,
+    MAX_ATTEMPTS,
+    Pending,
+    code_matches,
+    is_expired,
+    new_code,
+    pending_booking,
+    public_view,
+    send_limit,
+)
 from ragmed_a2a.client import AgentEvent, Progress
 from ragmed_a2a.client import Reply as AgentReply
 from ragmed_core.clinic import CLINICIAN_TYPES, GENERAL_PHYSICIAN
@@ -81,6 +97,7 @@ class State(TypedDict, total=False):
     asked_final: bool
     report: dict[str, Any] | None
     offer: dict[str, Any] | None
+    pending: Pending | None  # a booking waiting for its email code
     # This turn's outcome
     intent: str
     question: str
@@ -111,9 +128,11 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     limiter: RateLimiter | None = None,
     limits: Limits | None = None,
+    mailer: Mailer | None = None,
 ) -> CompiledStateGraph[Any]:
     limiter = limiter or MemoryRateLimiter()
     limits = limits or Limits()
+    mailer = mailer or ConsoleMailer()
 
     async def screen_node(state: State) -> State:
         flag = screen(state.get("message", ""))
@@ -212,17 +231,15 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         if kind not in CLINICIAN_TYPES or kind not in (offer["clinician_type"], GENERAL_PHYSICIAN):
             kind = offer["clinician_type"]  # only the recommended clinician or a GP
         try:
-            if action.get("type") == "book":
-                name, email = str(action.get("name", "")).strip(), str(action.get("email", ""))
-                if not name or not email.strip():
-                    text = "Please enter your name and email so we can send your invitation."
-                    return {"reply": Reply(kind="no_answer", text=text).model_dump()}
-                refusal = await booking_limit(limiter, limits, state.get("client", "unknown"))
-                if refusal:
-                    return {"reply": Reply(kind="no_answer", text=refusal).model_dump()}
-                start = str(action.get("start", ""))
-                return await _book(state, offer, kind=kind, start=start, name=name, email=email)
-            slots = await scheduling.find_slots(kind, int(offer["visit_minutes"]))
+            match action.get("type"):
+                case "book":
+                    return await _send_code(state, action, kind)
+                case "resend":
+                    return await _resend_code(state)
+                case "confirm":
+                    return await _confirm(state, offer, str(action.get("code", "")).strip())
+                case _:
+                    slots = await scheduling.find_slots(kind, int(offer["visit_minutes"]))
         except SchedulingError as error:
             return {"reply": Reply(kind="no_answer", text=str(error)).model_dump()}
         text = (
@@ -233,6 +250,84 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         )
         chosen = Offer(**{**offer, "clinician_type": kind})
         return {"reply": Reply(kind="slots", text=text, slots=slots, offer=chosen).model_dump()}
+
+    def _refuse(text: str) -> State:
+        return {"reply": Reply(kind="no_answer", text=text).model_dump()}
+
+    async def _email_code(booking: Pending, code: str) -> State:
+        try:
+            await mailer.send_code(booking["email"], code, CODE_MINUTES)
+        except MailError as error:
+            return _refuse(str(error))
+        text = (
+            f"We sent a 6-digit code to **{booking['email']}**. Enter it here to confirm your "
+            f"visit. It expires in {CODE_MINUTES} minutes."
+        )
+        reply = Reply(kind="verify_email", text=text, verification=public_view(booking))
+        return {"pending": booking, "reply": reply.model_dump()}
+
+    async def _send_code(state: State, action: dict[str, Any], kind: str) -> State:
+        name = str(action.get("name", "")).strip()[:80]
+        email = str(action.get("email", "")).strip()
+        start = str(action.get("start", "")).strip()
+        if not name or not EMAIL.match(email) or len(email) > 254:  # noqa: PLR2004
+            return _refuse("Please enter your name and a valid email so we can send your code.")
+        refusal = await send_limit(limiter, state.get("client", "unknown"), email)
+        if refusal:
+            return _refuse(refusal)
+        code = new_code()
+        booking = pending_booking(code, start=start, clinician_type=kind, name=name, email=email)
+        return await _email_code(booking, code)
+
+    async def _resend_code(state: State) -> State:
+        pending = state.get("pending")
+        if not pending:
+            return _refuse("Please choose a time first.")
+        refusal = await send_limit(limiter, state.get("client", "unknown"), pending["email"])
+        if refusal:
+            return _refuse(refusal)
+        code = new_code()
+        booking = pending_booking(
+            code,
+            start=pending["start"],
+            clinician_type=pending["clinician_type"],
+            name=pending["name"],
+            email=pending["email"],
+        )
+        return await _email_code(booking, code)
+
+    async def _confirm(state: State, offer: dict[str, Any], code: str) -> State:
+        pending = state.get("pending")
+        if not pending:
+            return _refuse("Please choose a time first.")
+        if is_expired(pending) or pending["attempts"] >= MAX_ATTEMPTS:
+            text = "That code has expired. Press “Send a new code” to get another one."
+            return _verify_again(pending, text)
+        if not code_matches(pending, code):
+            attempts = pending["attempts"] + 1
+            left = MAX_ATTEMPTS - attempts
+            text = (
+                f"That code is not right. You have {left} {'try' if left == 1 else 'tries'} left."
+                if left
+                else "That code is not right, and no tries are left. Send a new code."
+            )
+            return _verify_again({**pending, "attempts": attempts}, text)
+        refusal = await booking_limit(limiter, limits, state.get("client", "unknown"))
+        if refusal:
+            return {"pending": None, **_refuse(refusal)}
+        booked = await _book(
+            state,
+            offer,
+            kind=pending["clinician_type"],
+            start=pending["start"],
+            name=pending["name"],
+            email=pending["email"],
+        )
+        return {"pending": None, **booked}
+
+    def _verify_again(pending: Pending, text: str) -> State:
+        reply = Reply(kind="verify_email", text=text, verification=public_view(pending))
+        return {"pending": pending, "reply": reply.model_dump()}
 
     async def _book(
         state: State, offer: dict[str, Any], *, kind: str, start: str, name: str, email: str
@@ -319,4 +414,5 @@ def _new_intake() -> State:
         "asked_final": False,
         "report": None,
         "offer": None,
+        "pending": None,
     }

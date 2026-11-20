@@ -13,6 +13,7 @@ from coordinator_agent.executor import CoordinatorExecutor
 from coordinator_agent.graph import Diagnosis, build_graph
 from coordinator_agent.intake import Interviewer, LlmInterviewer
 from coordinator_agent.limits import Limits
+from coordinator_agent.mailer import ConsoleMailer, Mailer, SmtpMailer
 from coordinator_agent.router import LlmRouter, Router
 from coordinator_agent.scheduling import McpScheduling, Scheduling
 from ragmed_a2a.client import RemoteAgent
@@ -40,6 +41,13 @@ class CoordinatorSettings(CoreSettings):
     valkey_url: str | None = None
     # Saved conversations; without it, they live in memory and are lost on restart.
     database_url: SecretStr | None = None
+    # Sends booking verification codes, e.g. Gmail: smtp.gmail.com, 587, the address and an
+    # app password. Without a password, local runs log the code instead of emailing it.
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    mail_from: str | None = None  # defaults to smtp_username
     # Callers allowed to use this agent (the web app): JSON object of name to token.
     service_tokens: dict[str, SecretStr] = Field(default_factory=dict)
 
@@ -77,6 +85,22 @@ def _llm_interviewer(settings: CoordinatorSettings) -> Interviewer:  # pragma: n
     return LlmInterviewer(groq_models(settings.small_models, settings.small_reasoning))
 
 
+def make_mailer(settings: CoordinatorSettings) -> Mailer:
+    if settings.smtp_username and settings.smtp_password:
+        return SmtpMailer(
+            host=settings.smtp_host,
+            port=settings.smtp_port,
+            username=settings.smtp_username,
+            password=settings.smtp_password.get_secret_value(),
+            sender=settings.mail_from or settings.smtp_username,
+        )
+    if settings.environment is Environment.PRODUCTION:
+        raise RuntimeError(
+            "RAGMED_SMTP_USERNAME and RAGMED_SMTP_PASSWORD must be set in production"
+        )
+    return ConsoleMailer()
+
+
 def _secret(value: SecretStr | None) -> str | None:
     return value.get_secret_value() if value else None
 
@@ -91,6 +115,7 @@ def create_coordinator_app(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     limiter: RateLimiter | None = None,
     limits: Limits | None = None,
+    mailer: Mailer | None = None,
 ) -> ASGIApp:
     tokens = {name: token.get_secret_value() for name, token in settings.service_tokens.items()}
     if not tokens and settings.environment is Environment.PRODUCTION:
@@ -103,6 +128,7 @@ def create_coordinator_app(
         checkpointer=checkpointer or InMemorySaver(),
         limiter=limiter,
         limits=limits,
+        mailer=mailer or make_mailer(settings),
     )
     spec = dataclasses.replace(CARD, url=settings.public_url, requires_auth=bool(tokens))
     executor = CoordinatorExecutor(graph, limiter=limiter, limits=limits)

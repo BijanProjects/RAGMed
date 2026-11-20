@@ -1,0 +1,9 @@
+# Development environment. Compile with `make lock`.
+-e packages/ragmed_core
+
+mypy
+pip-tools
+pre-commit
+pytest
+pytest-cov
+ruff

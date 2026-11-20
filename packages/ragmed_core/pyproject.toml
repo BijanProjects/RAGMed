@@ -1,0 +1,17 @@
+[project]
+name = "ragmed-core"
+version = "0.1.0"
+description = "Shared settings, logging and trace context for RAGMed services."
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.9,<3",
+  "pydantic-settings>=2.6,<3",
+  "structlog>=24.4",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ragmed_core"]

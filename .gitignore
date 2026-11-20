@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/*.dec.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Data artifacts (rebuilt by the ingestion pipeline)
+data/artifacts/
+data/processed/
+*.index
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

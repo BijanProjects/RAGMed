@@ -49,7 +49,7 @@ jobs:
         run: pytest --cov --cov-report=term --cov-report=xml
 
   frontend:
-    name: Frontend lint, type-check, build
+    name: Frontend lint, type-check, build, UI tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -74,6 +74,12 @@ jobs:
 
       - name: Build (includes the TypeScript check)
         run: npm run build
+
+      - name: Install the browser for UI tests
+        run: npx playwright install --with-deps chromium
+
+      - name: UI tests (Playwright, backend mocked)
+        run: npm run test:e2e
 
   secrets:
     name: Secret scan

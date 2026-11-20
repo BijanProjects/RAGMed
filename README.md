@@ -114,11 +114,18 @@ slots, so every request passes these checks:
 | Messages per conversation | Coordinator | 60 per day |
 | Bookings per IP address | Coordinator | 3 per day |
 | Bookings for the whole clinic | Coordinator | 40 per day |
-| Request checks (action type, name, email) | Web app and Scheduling server | Refused before any model call |
+| Email verification before booking | Coordinator | A 6-digit code, valid 10 minutes, 5 tries |
+| Verification codes sent | Coordinator | 3 per address and 6 per IP address per hour |
+| Request checks (action type, name, email, code) | Web app and Scheduling server | Refused before any model call |
 
 - Counters live in **Valkey** (an open-source Redis), so every copy of the Coordinator shares
   them. If Valkey is down, requests are let through and the failure is logged: the bot check
   still applies, and an outage of the limiter does not take the clinic offline.
+- A visit is booked only after the patient types in a code sent to their email, so nobody can
+  book visits, or send calendar invitations, in someone else's name. The code never appears in
+  the chat, only a salted hash of it is stored, and the booking uses the verified details, not
+  whatever the browser sends afterwards. Codes are sent over SMTP (a Gmail app password works,
+  for free); without one, local runs write the code to the Coordinator's log.
 - Conversations are saved in **Postgres** (LangGraph's checkpointer), so a restart or a new
   deployment does not lose them.
 - Only the web app can reach the Coordinator: it sends a service token and the visitor's IP

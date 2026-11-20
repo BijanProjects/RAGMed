@@ -22,8 +22,8 @@ grep -q "^GROQ_API_KEY=." "$ROOT/.env" 2>/dev/null || [[ -n "${GROQ_API_KEY:-}" 
   || fail "GROQ_API_KEY missing: add it to $ROOT/.env"
 [[ -d "$FRONTEND/node_modules" ]] || (cd "$FRONTEND" && npm install --no-fund --no-audit)
 for port in 3000 8000 8001 9001 9002; do
-  if lsof -ti "tcp:$port" > /dev/null 2>&1; then
-    fail "port $port is in use (an earlier demo?). Stop it with: lsof -ti tcp:$port | xargs kill"
+  if lsof -ti "tcp:$port" -sTCP:LISTEN > /dev/null 2>&1; then
+    fail "port $port is in use (an earlier demo?). Stop it with: lsof -ti tcp:$port -sTCP:LISTEN | xargs kill"
   fi
 done
 
@@ -84,6 +84,12 @@ RAGMED_DATABASE_URL="$DATABASE_URL" RAGMED_VALKEY_URL="$VALKEY_URL" \
 
 echo "  calendar: $CALENDAR · conversations: $([[ -n $DATABASE_URL ]] && echo postgres || echo memory) · limits: $([[ -n $VALKEY_URL ]] && echo valkey || echo memory)"
 echo "  clinician view: http://localhost:3000/clinician (code: $ACCESS_CODE)"
+if grep -q '^RAGMED_SMTP_PASSWORD=.' "$ROOT/.env" 2> /dev/null; then
+  echo "  booking codes: emailed"
+else
+  echo "  booking codes: not emailed (no RAGMED_SMTP_* in .env); find them with"
+  echo "      grep 'verification code' $LOGS/coordinator-agent.log"
+fi
 echo "  starting web app          → http://localhost:3000  (Ctrl-C stops everything)"
 cd "$FRONTEND"
 # Cloudflare's published Turnstile test keys (always pass); production uses real ones.

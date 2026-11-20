@@ -50,3 +50,9 @@ source = ["ragmed_core", "ragmed_retrieval"]
 fail_under = 80
 show_missing = true
 skip_covered = true
+
+[[tool.mypy.overrides]]
+# Optional benchmark dependency; not installed in CI.
+module = ["sentence_transformers", "sentence_transformers.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

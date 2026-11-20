@@ -23,9 +23,11 @@ lock: venv ## Re-pin requirements/*.txt from requirements/*.in
 	for name in dev bench; do \
 		$(BIN)/pip-compile --quiet --strip-extras --no-emit-index-url \
 			--output-file requirements/$$name.txt requirements/$$name.in && \
-		sed -i.bak 's#^-e file:///.*/packages/#-e ./packages/#' requirements/$$name.txt && \
+		sed -i.bak -E 's#^-e file:///.*/backend/(packages|services)/#-e ./\1/#' requirements/$$name.txt && \
 		rm requirements/$$name.txt.bak; \
 	done
+	@# Lock files must work on any machine: fail if a local absolute path slipped through.
+	@! grep -n "file://" requirements/*.txt || (echo "absolute paths in lock files" && false)
 
 lint: ## Lint and check formatting
 	$(BIN)/ruff check .

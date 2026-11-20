@@ -8,7 +8,7 @@
     # via
     #   -r requirements/dev.in
     #   ragmed-mcp-medical
--e file:///Users/bijan/Projects/RAGMed/backend/services/mcp_medical
+-e ./services/mcp_medical
     # via -r requirements/dev.in
 -e ./packages/ragmed_retrieval
     # via

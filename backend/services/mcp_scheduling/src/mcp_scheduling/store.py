@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS appointments (
     minutes INTEGER NOT NULL,
     clinician_type TEXT NOT NULL,
     physician TEXT NOT NULL,
+    patient_name TEXT NOT NULL DEFAULT '',
     urgency TEXT NOT NULL,
     status TEXT NOT NULL,
     report TEXT NOT NULL,
@@ -39,6 +40,7 @@ class Appointment:
     minutes: int
     clinician_type: str
     physician: str
+    patient_name: str
     urgency: str
     status: str
     report: dict[str, Any]
@@ -63,6 +65,11 @@ class AppointmentStore:
         )
         with self._connect() as db:
             db.execute(_SCHEMA)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(appointments)")}
+            if "patient_name" not in columns:  # databases from before names were collected
+                db.execute(
+                    "ALTER TABLE appointments ADD COLUMN patient_name TEXT NOT NULL DEFAULT ''"
+                )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:

@@ -202,7 +202,12 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             kind = offer["clinician_type"]  # only the recommended clinician or a GP
         try:
             if action.get("type") == "book":
-                return await _book(state, offer, kind, str(action.get("start", "")))
+                name, email = str(action.get("name", "")).strip(), str(action.get("email", ""))
+                if not name or not email.strip():
+                    text = "Please enter your name and email so we can send your invitation."
+                    return {"reply": Reply(kind="no_answer", text=text).model_dump()}
+                start = str(action.get("start", ""))
+                return await _book(state, offer, kind=kind, start=start, name=name, email=email)
             slots = await scheduling.find_slots(kind, int(offer["visit_minutes"]))
         except SchedulingError as error:
             return {"reply": Reply(kind="no_answer", text=str(error)).model_dump()}
@@ -215,7 +220,9 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         chosen = Offer(**{**offer, "clinician_type": kind})
         return {"reply": Reply(kind="slots", text=text, slots=slots, offer=chosen).model_dump()}
 
-    async def _book(state: State, offer: dict[str, Any], kind: str, start: str) -> State:
+    async def _book(
+        state: State, offer: dict[str, Any], *, kind: str, start: str, name: str, email: str
+    ) -> State:
         report = {**(state.get("report") or {}), "clinician_type": kind}
         booked = await scheduling.book(
             clinician_type=kind,
@@ -224,11 +231,14 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             session_id=state["session"],
             urgency=offer["urgency"] if offer["urgency"] != "emergency" else "urgent",
             report=report,
+            patient_name=name,
+            patient_email=email.strip(),
         )
         text = (
-            f"**Booked.** Your {booked['minutes']}-minute visit with {booked['physician']} "
+            f"**Booked.** Your {int(booked['minutes'])}-minute visit with {booked['physician']} "
             f"({booked['clinician_type']}) is confirmed. Your reference is "
-            f"**{booked['reference']}**. Your draft report has been sent to the physician."
+            f"**{booked['reference']}**. An invitation has been sent to {email.strip()}, and your "
+            "draft report has been sent to the physician."
         )
         reply = Reply(kind="booked", text=text, appointment=booked)
         return {"phase": "booked", "reply": reply.model_dump()}

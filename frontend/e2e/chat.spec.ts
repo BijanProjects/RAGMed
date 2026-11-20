@@ -1,9 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const SLOTS = [
-  { start: "2026-11-23T09:00:00-03:30", end: "2026-11-23T09:30:00-03:30", physician: "Dr. Isabel Cohen", clinician_type: "Neurology", visit_minutes: 30 },
-  { start: "2026-11-23T10:30:00-03:30", end: "2026-11-23T11:00:00-03:30", physician: "Dr. Daniel Osei", clinician_type: "Neurology", visit_minutes: 30 },
-  { start: "2026-11-24T14:00:00-03:30", end: "2026-11-24T14:30:00-03:30", physician: "Dr. Isabel Cohen", clinician_type: "Neurology", visit_minutes: 30 },
+  { start: "2026-11-23T09:00:00-03:30", end: "2026-11-23T09:30:00-03:30", physician: "Dr. Fred Nurk", clinician_type: "Neurology", visit_minutes: 30 },
+  { start: "2026-11-23T10:30:00-03:30", end: "2026-11-23T11:00:00-03:30", physician: "Dr. Joe Public", clinician_type: "Neurology", visit_minutes: 30 },
+  { start: "2026-11-24T14:00:00-03:30", end: "2026-11-24T14:30:00-03:30", physician: "Dr. Fred Nurk", clinician_type: "Neurology", visit_minutes: 30 },
 ];
 const OFFER = { clinician_type: "Neurology", visit_minutes: 30, urgency: "routine", alternative: "General physician" };
 
@@ -39,7 +39,7 @@ test("the whole intake: questions, report, times, confirmation, booking", async 
     if (action?.type === "book") {
       return [reply("booked", "**Booked.**", {
         appointment: { reference: "RC-TEST42", start: action.start, end: action.start, minutes: 30,
-          clinician_type: "Neurology", physician: "Dr. Daniel Osei", urgency: "routine", status: "booked" },
+          clinician_type: "Neurology", physician: "Dr. Joe Public", urgency: "routine", status: "booked" },
       })];
     }
     if (action?.type === "show_slots") {
@@ -70,20 +70,29 @@ test("the whole intake: questions, report, times, confirmation, booking", async 
   await expect(page.getByText("Monday, November 23")).toBeVisible();
   await expect(page.getByText("Tuesday, November 24")).toBeVisible();
 
-  await page.getByRole("button", { name: /10:30.*Dr\. Daniel Osei/ }).click();
-  const confirm = page.getByRole("dialog", { name: "Confirm booking" });
+  await page.getByRole("button", { name: /10:30.*Dr\. Joe Public/ }).click();
+  const confirm = page.getByRole("form", { name: "Confirm booking" });
   await expect(confirm).toContainText("Monday, November 23, 10:30");
-  await confirm.getByRole("button", { name: "Confirm booking" }).click();
+  const book = confirm.getByRole("button", { name: "Confirm booking" });
+  await expect(book).toBeDisabled(); // name and email first
+  await confirm.getByLabel("Your name").fill("Alex Sample");
+  await confirm.getByLabel("Email for the invitation").fill("alex@example");
+  await expect(book).toBeDisabled(); // not a complete address
+  await confirm.getByLabel("Email for the invitation").fill("alex@example.org");
+  await book.click();
 
   await expect(page.getByText("Your visit is booked")).toBeVisible();
   await expect(page.getByText("RC-TEST42")).toBeVisible();
-  await expect(page.getByText(/draft pre-visit report has been sent to Dr\. Daniel Osei/)).toBeVisible();
+  await expect(page.getByText(/invitation is on its way by email/)).toBeVisible();
 
   expect(requests.map((r) => r.action ?? r.message)).toEqual([
     "I've had headaches on one side for a month",
     "About a month",
     { type: "show_slots" },
-    { type: "book", start: "2026-11-23T10:30:00-03:30", clinician_type: "Neurology" },
+    {
+      type: "book", start: "2026-11-23T10:30:00-03:30", clinician_type: "Neurology",
+      name: "Alex Sample", email: "alex@example.org",
+    },
   ]);
   expect(requests.slice(1).every((r) => r.contextId === "ctx-1")).toBe(true);
 });

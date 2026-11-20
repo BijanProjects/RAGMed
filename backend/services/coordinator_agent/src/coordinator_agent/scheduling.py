@@ -23,6 +23,8 @@ class Scheduling(Protocol):
         session_id: str,
         urgency: str,
         report: dict[str, Any],
+        patient_name: str,
+        patient_email: str,
     ) -> dict[str, Any]: ...
 
 
@@ -57,6 +59,8 @@ class McpScheduling:
         session_id: str,
         urgency: str,
         report: dict[str, Any],
+        patient_name: str,
+        patient_email: str,
     ) -> dict[str, Any]:
         booked: dict[str, Any] = await self._call(
             "book_visit",
@@ -67,6 +71,8 @@ class McpScheduling:
                 "session_id": session_id,
                 "urgency": urgency,
                 "report": report,
+                "patient_name": patient_name,
+                "patient_email": patient_email,
             },
         )
         return booked

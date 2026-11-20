@@ -31,10 +31,6 @@ done
 CALENDAR="${DEMO_CALENDAR:-}"
 if [[ -z "$CALENDAR" ]]; then
   if grep -q "^CAL_API_KEY=." "$ROOT/.env" 2>/dev/null; then CALENDAR=calcom; else CALENDAR=memory; fi
-  if [[ "$CALENDAR" == calcom ]] && ! grep -q "^RAGMED_CLINIC_EMAIL=." "$ROOT/.env" 2>/dev/null; then
-    echo "  note: Cal.com needs RAGMED_CLINIC_EMAIL (a clinic inbox) in .env; using the built-in calendar"
-    CALENDAR=memory
-  fi
 fi
 # Fresh random tokens for each run: the clinician page reads appointments with one.
 CLINICIAN_TOKEN="$("$PY" -c 'import secrets; print(secrets.token_urlsafe(32))')"

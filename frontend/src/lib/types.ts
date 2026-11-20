@@ -38,6 +38,7 @@ export interface Appointment {
   minutes: number;
   clinician_type: string;
   physician: string;
+  patient_name?: string;
   urgency: string;
   status: string;
 }
@@ -76,7 +77,7 @@ export interface ReplyData {
 /** A button press, sent to the Coordinator alongside (or instead of) text. */
 export type ChatAction =
   | { type: "show_slots"; clinician_type?: string }
-  | { type: "book"; start: string; clinician_type?: string };
+  | { type: "book"; start: string; clinician_type?: string; name: string; email: string };
 
 /** What /api/chat streams to the browser, one JSON object per event. */
 export type ChatEvent =

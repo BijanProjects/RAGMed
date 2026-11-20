@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import type { Appointment, ChatAction, ChatEvent, Offer, ReplyData, Slot } from "@/lib/types";
 
 const CLINIC_TIME_ZONE = process.env.NEXT_PUBLIC_CLINIC_TIME_ZONE ?? "America/St_Johns";
+const EMAIL = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$/;
 
 interface Message {
   id: string;
@@ -219,8 +220,8 @@ export function Chat() {
         </button>
       </form>
       <p className="pb-3 text-center text-xs text-neutral-500">
-        Educational demo, not a medical device. Please don&apos;t enter real personal health data. In an emergency,
-        call your local emergency number. ·{" "}
+        Educational demo, not a medical device; physician names are placeholders. Please don&apos;t enter real
+        health data. In an emergency, call your local emergency number. ·{" "}
         <Link href="/clinician" className="underline hover:text-neutral-700 dark:hover:text-neutral-300">
           Clinician view
         </Link>
@@ -379,6 +380,10 @@ function SlotPicker({
   onSend: (outgoing: Outgoing) => void;
 }) {
   const [chosen, setChosen] = useState<Slot | null>(null);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const emailOk = EMAIL.test(email.trim());
+  const ready = name.trim().length > 0 && emailOk;
   const days = new Map<string, Slot[]>();
   for (const slot of slots) {
     const day = dayFormat.format(new Date(slot.start));
@@ -412,26 +417,63 @@ function SlotPicker({
         </div>
       ))}
       {chosen && active && (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-sky-50 p-3 dark:bg-sky-950/40" role="dialog" aria-label="Confirm booking">
-          <p className="flex-1 text-sm">
+        <form
+          className="space-y-3 rounded-xl bg-sky-50 p-3 dark:bg-sky-950/40"
+          aria-label="Confirm booking"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!ready) return;
+            onSend({
+              action: {
+                type: "book",
+                start: chosen.start,
+                clinician_type: chosen.clinician_type,
+                name: name.trim(),
+                email: email.trim(),
+              },
+              label: `Book ${formatWhen(chosen.start)} with ${chosen.physician}`,
+            });
+          }}
+        >
+          <p className="text-sm">
             Book <strong>{formatWhen(chosen.start)}</strong> with {chosen.physician} ({chosen.clinician_type},{" "}
-            {minutes} min)?
+            {minutes} min). We&apos;ll email your invitation.
           </p>
-          <button
-            className={primary}
-            onClick={() =>
-              onSend({
-                action: { type: "book", start: chosen.start, clinician_type: chosen.clinician_type },
-                label: `Book ${formatWhen(chosen.start)} with ${chosen.physician}`,
-              })
-            }
-          >
-            Confirm booking
-          </button>
-          <button className={secondary} onClick={() => setChosen(null)}>
-            Choose another
-          </button>
-        </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="text-sm">
+              <span className="mb-1 block text-neutral-600 dark:text-neutral-400">Your name</span>
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                maxLength={80}
+                autoComplete="name"
+                required
+                className="w-full rounded-lg border border-black/15 bg-white px-3 py-1.5 outline-none focus:border-sky-500 dark:border-white/15 dark:bg-transparent"
+              />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-neutral-600 dark:text-neutral-400">Email for the invitation</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                maxLength={254}
+                autoComplete="email"
+                required
+                aria-invalid={email.length > 0 && !emailOk}
+                className="w-full rounded-lg border border-black/15 bg-white px-3 py-1.5 outline-none focus:border-sky-500 aria-[invalid=true]:border-red-500 dark:border-white/15 dark:bg-transparent"
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" className={primary} disabled={!ready}>
+              Confirm booking
+            </button>
+            <button type="button" className={secondary} onClick={() => setChosen(null)}>
+              Choose another
+            </button>
+          </div>
+        </form>
       )}
     </div>
   );
@@ -454,8 +496,8 @@ function BookedCard({ appointment }: { appointment: Appointment }) {
         <dd className="font-mono font-semibold">{appointment.reference}</dd>
       </dl>
       <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        Your draft pre-visit report has been sent to {appointment.physician}. It is not a diagnosis; your clinician
-        will assess you at the visit.
+        Your calendar invitation is on its way by email, and your draft pre-visit report has been sent to{" "}
+        {appointment.physician}. It is not a diagnosis; your clinician will assess you at the visit.
       </p>
     </div>
   );

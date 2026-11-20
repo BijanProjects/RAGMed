@@ -3,9 +3,10 @@
 Safeguards: only the clinic's clinician types and the two visit lengths; at most
 `MAX_BOOKINGS_PER_DAY` bookings per chat session per day; a repeated booking request returns
 the first booking instead of creating another; only the session that booked can cancel.
-Patients are anonymous: a booking carries a reference code, never a name or email.
+The patient's email goes to the calendar, which sends the invitation; it is not stored here.
 """
 
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
@@ -26,22 +27,7 @@ from ragmed_core.tokens import match_caller
 
 MAX_BOOKINGS_PER_DAY = 2
 SLOTS_PER_DAY = 4
-ATTENDEE_DOMAIN = "example.com"  # reserved for examples (RFC 2606): nothing is ever delivered
-
-
-def attendee_email(reference: str, clinic_email: str | None) -> str:
-    """The address a booking is made under. Patients are anonymous, so it is never theirs.
-
-    Cal.com refuses undeliverable addresses, so with a clinic inbox each booking uses a
-    plus-address tagged with its reference (clinic+rc-7k2q9f@domain), which delivers to the
-    clinic. Without one (the in-memory calendar), a reserved example.com address is used.
-    """
-    tag = reference.lower()
-    if not clinic_email:
-        return f"patient-{tag}@{ATTENDEE_DOMAIN}"
-    local, _, domain = clinic_email.partition("@")
-    return f"{local.split('+', 1)[0]}+{tag}@{domain}"
-
+EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
 WRITES = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=True)
@@ -77,7 +63,6 @@ def build_server(  # noqa: PLR0915 - one closure per tool, next to the data it u
     time_zone: str,
     auth: TokenVerifier | None = None,
     clinician_tokens: dict[str, str] | None = None,
-    clinic_email: str | None = None,
 ) -> FastMCP:
     zone = ZoneInfo(time_zone)
     mcp = FastMCP(
@@ -126,8 +111,15 @@ def build_server(  # noqa: PLR0915 - one closure per tool, next to the data it u
         session_id: Annotated[str, Field(min_length=8, max_length=100)],
         urgency: Literal["self_care", "routine", "urgent"],
         report: Annotated[dict[str, Any], Field(description="The pre-visit report.")],
+        patient_name: Annotated[str, Field(min_length=1, max_length=80)],
+        patient_email: Annotated[str, Field(max_length=254, description="Gets the invitation.")],
     ) -> dict[str, Any]:
-        """Book a visit and attach the patient's pre-visit report for the physician."""
+        """Book a visit, invite the patient by email, and attach their report for the physician."""
+        name, email = " ".join(patient_name.split()), patient_email.strip()
+        if not name:
+            raise ToolError("Please give the patient's name.")
+        if not EMAIL.match(email):
+            raise ToolError("That email address does not look right. Please check it.")
         try:
             kind = normalise(clinician_type)
             begins = datetime.fromisoformat(start)
@@ -145,11 +137,7 @@ def build_server(  # noqa: PLR0915 - one closure per tool, next to the data it u
 
         reference = new_reference()
         physician = physician_for(kind, begins.isoformat())
-        attendee = Attendee(
-            name=f"Patient {reference}",
-            email=attendee_email(reference, clinic_email),
-            time_zone=time_zone,
-        )
+        attendee = Attendee(name=name, email=email, time_zone=time_zone)
         summary = str(report.get("summary", ""))[:900]
         try:
             booking = await provider.book(
@@ -176,6 +164,7 @@ def build_server(  # noqa: PLR0915 - one closure per tool, next to the data it u
             minutes=visit_minutes,
             clinician_type=kind,
             physician=physician,
+            patient_name=name,
             urgency=urgency,
             status="booked",
             report=report,

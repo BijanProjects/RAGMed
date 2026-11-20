@@ -1,6 +1,7 @@
 """RAGMed Clinic: a hypothetical clinic with general physicians and every major specialty.
 
-All names are fictional.
+Every physician has a well-known placeholder name (John Doe, Joe Bloggs, Max Mustermann, ...)
+so nobody mistakes them for real people.
 """
 
 import hashlib
@@ -15,26 +16,26 @@ VisitMinutes = Literal[15, 30]
 __all__ = ["CLINICIAN_TYPES", "GENERAL", "ROSTER", "VisitMinutes", "normalise", "physician_for"]
 
 ROSTER: dict[str, tuple[str, ...]] = {
-    GENERAL: ("Dr. Amara Okafor", "Dr. Liam Fournier", "Dr. Priya Raman", "Dr. Sofia Lindqvist"),
-    "Allergy and immunology": ("Dr. Kenji Watanabe",),
-    "Cardiology": ("Dr. Elena Marquez", "Dr. Samuel Achebe"),
-    "Dermatology": ("Dr. Hannah Brooks",),
-    "Endocrinology": ("Dr. Omar Haddad",),
-    "Gastroenterology": ("Dr. Chloe Martin",),
-    "Hematology": ("Dr. Ravi Menon",),
-    "Infectious disease": ("Dr. Grace Mwangi",),
-    "Nephrology": ("Dr. Lucas Petrov",),
-    "Neurology": ("Dr. Isabel Cohen", "Dr. Daniel Osei"),
-    "Obstetrics and gynecology": ("Dr. Fatima Noor",),
-    "Oncology": ("Dr. Thomas Berg",),
-    "Ophthalmology": ("Dr. Mei Lin",),
-    "Orthopedics": ("Dr. Jonah Fraser",),
-    "Otolaryngology (ENT)": ("Dr. Aisha Bello",),
-    "Pediatrics": ("Dr. Noah Tremblay", "Dr. Leila Karimi"),
-    "Psychiatry": ("Dr. Martin Novak",),
-    "Pulmonology": ("Dr. Yara Haddad",),
-    "Rheumatology": ("Dr. Clara Rossi",),
-    "Urology": ("Dr. Ethan Walsh",),
+    GENERAL: ("Dr. John Doe", "Dr. Jane Doe", "Dr. Richard Roe", "Dr. Jane Roe"),
+    "Allergy and immunology": ("Dr. Joe Bloggs",),
+    "Cardiology": ("Dr. Max Mustermann", "Dr. Erika Mustermann"),
+    "Dermatology": ("Dr. Jean Dupont",),
+    "Endocrinology": ("Dr. Mario Rossi",),
+    "Gastroenterology": ("Dr. Jan Kowalski",),
+    "Hematology": ("Dr. Ivan Ivanov",),
+    "Infectious disease": ("Dr. Taro Yamada",),
+    "Nephrology": ("Dr. Ola Nordmann",),
+    "Neurology": ("Dr. Fred Nurk", "Dr. Joe Public"),
+    "Obstetrics and gynecology": ("Dr. Kari Nordmann",),
+    "Oncology": ("Dr. Juan Pérez",),
+    "Ophthalmology": ("Dr. Hanako Yamada",),
+    "Orthopedics": ("Dr. Tommy Atkins",),
+    "Otolaryngology (ENT)": ("Dr. Marie Dupont",),
+    "Pediatrics": ("Dr. Jan Jansen", "Dr. Sven Svensson"),
+    "Psychiatry": ("Dr. A. N. Other",),
+    "Pulmonology": ("Dr. Juan dela Cruz",),
+    "Rheumatology": ("Dr. Anna Kowalska",),
+    "Urology": ("Dr. Pat Doe",),
 }
 
 

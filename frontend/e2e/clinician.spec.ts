@@ -9,9 +9,9 @@ const REPORT = {
 };
 const VISITS = [
   { reference: "RC-URGENT", start: "2026-11-23T09:00:00-03:30", end: "", minutes: 30, clinician_type: "Neurology",
-    physician: "Dr. Isabel Cohen", urgency: "urgent", status: "booked", booking_uid: "u1", created_at: "", report: REPORT },
+    physician: "Dr. Fred Nurk", urgency: "urgent", status: "booked", booking_uid: "u1", created_at: "", report: REPORT },
   { reference: "RC-ROUTINE", start: "2026-11-24T10:00:00-03:30", end: "", minutes: 15, clinician_type: "General physician",
-    physician: "Dr. Amara Okafor", urgency: "routine", status: "booked", booking_uid: "u2", created_at: "",
+    physician: "Dr. John Doe", urgency: "routine", status: "booked", booking_uid: "u2", created_at: "",
     report: { ...REPORT, urgency: "routine", case: { "Main problem": "Renew a prescription" } } },
 ];
 

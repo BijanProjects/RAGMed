@@ -101,6 +101,7 @@ export function ClinicianView() {
               {visit.urgency.replace("_", " ")}
             </span>
             <span className="font-mono text-sm">{visit.reference}</span>
+            {visit.patient_name && <span className="text-sm font-medium">{visit.patient_name}</span>}
             <span className="text-sm text-neutral-500">
               {formatWhen(visit.start)} · {Math.round(visit.minutes)} min · {visit.physician} ({visit.clinician_type})
             </span>

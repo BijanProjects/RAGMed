@@ -2,6 +2,7 @@ import { askCoordinator } from "@/lib/coordinator";
 import type { ChatAction, ChatEvent } from "@/lib/types";
 
 const MAX_MESSAGE_CHARS = 2000;
+const EMAIL = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?([+-]\d{2}:\d{2}|Z)$/;
 
 /** Only the two known buttons, with only their known fields, reach the backend. */
@@ -12,7 +13,10 @@ function parseAction(value: unknown): ChatAction | undefined | null {
   const kind = typeof raw.clinician_type === "string" ? raw.clinician_type.slice(0, 60) : undefined;
   if (raw.type === "show_slots") return { type: "show_slots", clinician_type: kind };
   if (raw.type === "book" && typeof raw.start === "string" && ISO_TIME.test(raw.start)) {
-    return { type: "book", start: raw.start, clinician_type: kind };
+    const name = typeof raw.name === "string" ? raw.name.trim().slice(0, 80) : "";
+    const email = typeof raw.email === "string" ? raw.email.trim() : "";
+    if (!name || email.length > 254 || !EMAIL.test(email)) return null;
+    return { type: "book", start: raw.start, clinician_type: kind, name, email };
   }
   return null;
 }

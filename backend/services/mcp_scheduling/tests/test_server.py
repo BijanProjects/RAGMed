@@ -5,9 +5,9 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
-from mcp_scheduling.app import SchedulingSettings, create_server, make_provider
+from mcp_scheduling.app import SchedulingSettings, create_server
 from mcp_scheduling.providers import InMemoryProvider
-from mcp_scheduling.server import MAX_BOOKINGS_PER_DAY, attendee_email, build_server
+from mcp_scheduling.server import MAX_BOOKINGS_PER_DAY, build_server
 from mcp_scheduling.store import AppointmentStore
 from ragmed_core.settings import Environment
 
@@ -15,6 +15,7 @@ pytestmark = pytest.mark.anyio
 CLINICIAN = "k" * 40
 SESSION = "session-123456"
 REPORT = {"summary": "Headache for three days", "urgency": "routine"}
+PATIENT = {"patient_name": "Alex Sample", "patient_email": "alex@example.org"}
 
 
 @pytest.fixture
@@ -50,7 +51,7 @@ async def book(server: Any, slot: dict[str, Any], session: str = SESSION) -> dic
     booked: dict[str, Any] = await call(
         server, "book_visit", clinician_type=slot["clinician_type"],
         visit_minutes=slot["visit_minutes"], start=slot["start"], session_id=session,
-        urgency="routine", report=REPORT,
+        urgency="routine", report=REPORT, **PATIENT,
     )  # fmt: skip
     return booked
 
@@ -69,7 +70,7 @@ async def test_slots_are_spread_over_days_with_a_physician(server: Any) -> None:
 
     days = {s["start"][:10] for s in slots}
     assert all(sum(s["start"].startswith(d) for s in slots) <= 4 for d in days)
-    assert all(s["physician"] in ("Dr. Isabel Cohen", "Dr. Daniel Osei") for s in slots)
+    assert all(s["physician"] in ("Dr. Fred Nurk", "Dr. Joe Public") for s in slots)
     assert all(s["start"].endswith("-03:30") or s["start"].endswith("-02:30") for s in slots)
 
 
@@ -101,18 +102,38 @@ async def test_booking_stores_the_report_and_takes_the_slot(server: Any) -> None
     assert slot["start"] not in {s["start"] for s in later}
 
 
-async def test_the_calendar_only_ever_sees_an_anonymous_patient(
+async def test_the_patient_gets_the_invitation_and_their_email_stays_out_of_the_store(
     server: Any, calendar: InMemoryProvider
 ) -> None:
     booked = await book(server, await first_slot(server))
 
     (attendee, metadata, notes) = calendar.received[0]
-    reference = booked["reference"]
-    assert attendee.name == f"Patient {reference}"
-    assert attendee.email == f"patient-{reference.lower()}@example.com"
-    assert metadata["reference"] == reference
+    assert (attendee.name, attendee.email) == ("Alex Sample", "alex@example.org")
+    assert metadata["reference"] == booked["reference"]
     assert "not a diagnosis" in metadata["source"]
-    assert reference in notes
+    assert booked["reference"] in notes
+    assert booked["patient_name"] == "Alex Sample"
+    assert "alex@example.org" not in str(booked)
+
+
+@pytest.mark.parametrize(
+    ("patient", "message"),
+    [
+        ({"patient_name": "Alex", "patient_email": "not-an-email"}, "email address"),
+        ({"patient_name": "Alex", "patient_email": "a@b"}, "email address"),
+        ({"patient_name": "   ", "patient_email": "alex@example.org"}, "name"),
+    ],
+)
+async def test_patient_details_are_checked(
+    server: Any, patient: dict[str, str], message: str
+) -> None:
+    slot = await first_slot(server)
+
+    with pytest.raises(ToolError, match=message):
+        await call(
+            server, "book_visit", clinician_type=slot["clinician_type"], visit_minutes=30,
+            start=slot["start"], session_id=SESSION, urgency="routine", report=REPORT, **patient,
+        )  # fmt: skip
 
 
 async def test_a_repeated_request_returns_the_first_booking(server: Any) -> None:
@@ -172,7 +193,7 @@ async def test_clinician_page_needs_its_token_and_lists_urgent_first(server: Any
     ]:
         await call(
             server, "book_visit", clinician_type=slot["clinician_type"], visit_minutes=15,
-            start=slot["start"], session_id=session, urgency=urgency, report=REPORT,
+            start=slot["start"], session_id=session, urgency=urgency, report=REPORT, **PATIENT,
         )  # fmt: skip
 
     refused = await get_clinician(server, None)
@@ -192,14 +213,3 @@ def test_production_requires_service_tokens(tmp_path: Any) -> None:
 
     with pytest.raises(RuntimeError, match="RAGMED_SERVICE_TOKENS"):
         create_server(settings, InMemoryProvider())
-
-
-def test_bookings_use_a_tagged_clinic_address_never_the_patients() -> None:
-    assert attendee_email("RC-7K2Q9F", None) == "patient-rc-7k2q9f@example.com"
-    assert attendee_email("RC-7K2Q9F", "clinic@gmail.com") == "clinic+rc-7k2q9f@gmail.com"
-    assert attendee_email("RC-7K2Q9F", "clinic+old@gmail.com") == "clinic+rc-7k2q9f@gmail.com"
-
-
-async def test_calcom_mode_needs_a_clinic_inbox() -> None:
-    with pytest.raises(RuntimeError, match="RAGMED_CLINIC_EMAIL"):
-        await make_provider(SchedulingSettings(calendar="calcom", clinic_email=None))

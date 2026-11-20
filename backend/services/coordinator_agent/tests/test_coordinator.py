@@ -22,6 +22,7 @@ from ragmed_llm import AtCapacityError
 
 pytestmark = pytest.mark.anyio
 BASE = "http://coordinator.test"
+PATIENT = {"name": "Alex Sample", "email": "alex@example.org"}
 
 
 class Chat:
@@ -232,13 +233,18 @@ async def test_show_times_then_book_sends_the_report_to_the_physician() -> None:
 
     slots = await chat.send(action={"type": "show_slots"})
     start = data(slots)["slots"][1]["start"]
-    booked = await chat.send(action={"type": "book", "start": start})
+    booked = await chat.send(action={"type": "book", "start": start, **PATIENT})
 
     assert data(slots)["kind"] == "slots"
     assert chat.scheduling.searches == [("Neurology", 30)]
     assert data(booked)["kind"] == "booked"
     assert "RC-TEST42" in booked.text
+    assert "invitation has been sent to alex@example.org" in booked.text
     request = chat.scheduling.bookings[0]
+    assert (request["patient_name"], request["patient_email"]) == (
+        "Alex Sample",
+        "alex@example.org",
+    )
     assert request["start"] == start
     assert request["session_id"] == chat.context_id
     assert request["urgency"] == "routine"
@@ -251,7 +257,12 @@ async def test_the_patient_can_choose_a_general_physician_instead() -> None:
 
     slots = await chat.send(action={"type": "show_slots", "clinician_type": "General physician"})
     await chat.send(
-        action={"type": "book", "start": SLOT_START, "clinician_type": "General physician"}
+        action={
+            "type": "book",
+            "start": SLOT_START,
+            "clinician_type": "General physician",
+            **PATIENT,
+        }
     )
 
     assert chat.scheduling.searches == [("General physician", 30)]
@@ -275,9 +286,19 @@ async def test_scheduling_problems_are_shown_plainly() -> None:
     chat = Chat(scheduling=FakeScheduling(error="That time is no longer available."))
     await chat.interview_to_report()
 
-    reply = await chat.send(action={"type": "book", "start": SLOT_START})
+    reply = await chat.send(action={"type": "book", "start": SLOT_START, **PATIENT})
 
     assert reply.text == "That time is no longer available."
+
+
+async def test_booking_needs_the_patients_name_and_email() -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+
+    reply = await chat.send(action={"type": "book", "start": SLOT_START, "name": "Alex"})
+
+    assert chat.scheduling.bookings == []
+    assert "name and email" in reply.text
 
 
 async def test_booking_without_a_report_is_refused() -> None:

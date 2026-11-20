@@ -26,14 +26,14 @@ SLOTS: list[dict[str, Any]] = [
     {
         "start": "2026-11-23T09:00:00-03:30",
         "end": "2026-11-23T09:30:00-03:30",
-        "physician": "Dr. Isabel Cohen",
+        "physician": "Dr. Fred Nurk",
         "clinician_type": "Neurology",
         "visit_minutes": 30,
     },
     {
         "start": "2026-11-23T10:00:00-03:30",
         "end": "2026-11-23T10:30:00-03:30",
-        "physician": "Dr. Daniel Osei",
+        "physician": "Dr. Joe Public",
         "clinician_type": "Neurology",
         "visit_minutes": 30,
     },
@@ -114,7 +114,8 @@ class FakeScheduling:
             "start": request["start"],
             "minutes": request["visit_minutes"],
             "clinician_type": request["clinician_type"],
-            "physician": "Dr. Isabel Cohen",
+            "physician": "Dr. Fred Nurk",
+            "patient_name": request["patient_name"],
             "urgency": request["urgency"],
             "status": "booked",
         }

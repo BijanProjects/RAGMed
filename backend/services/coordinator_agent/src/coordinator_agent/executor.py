@@ -34,7 +34,8 @@ def read_action(context: RequestContext) -> dict[str, Any] | None:
     for data in get_data_parts(context.message.parts):
         action = data.get("action") if isinstance(data, dict) else None
         if isinstance(action, dict) and action.get("type") in ACTIONS:
-            return {k: v for k, v in action.items() if k in ("type", "start", "clinician_type")}
+            fields = ("type", "start", "clinician_type", "name", "email")
+            return {k: v for k, v in action.items() if k in fields}
     return None
 
 

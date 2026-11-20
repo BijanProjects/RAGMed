@@ -95,10 +95,12 @@ cd "$FRONTEND"
 # Turnstile keys from .env when present (localhost must be one of the widget's hostnames),
 # otherwise Cloudflare's published test keys, which always pass.
 env_value() { sed -n "s/^$1=//p" "$ROOT/.env" 2> /dev/null | tail -1 | tr -d "\"'"; }
+CHECK_SOURCE="keys set in the shell"
+[[ -z ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-} ]] && CHECK_SOURCE="your Cloudflare Turnstile keys from .env"
 NEXT_PUBLIC_TURNSTILE_SITE_KEY="${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-$(env_value NEXT_PUBLIC_TURNSTILE_SITE_KEY)}"
 TURNSTILE_SECRET_KEY="${TURNSTILE_SECRET_KEY:-$(env_value TURNSTILE_SECRET_KEY)}"
 if [[ -n $NEXT_PUBLIC_TURNSTILE_SITE_KEY && -n $TURNSTILE_SECRET_KEY ]]; then
-  echo "  bot check: your Cloudflare Turnstile keys"
+  echo "  bot check: $CHECK_SOURCE"
 else
   echo "  bot check: Cloudflare's test keys (always pass)"
 fi

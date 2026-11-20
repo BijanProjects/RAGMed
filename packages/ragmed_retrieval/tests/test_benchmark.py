@@ -1,6 +1,3 @@
-import hashlib
-import re
-from collections.abc import Sequence
 from itertools import count
 from pathlib import Path
 
@@ -14,33 +11,10 @@ from ragmed_retrieval.benchmark import (
     top_k,
 )
 from ragmed_retrieval.chunking import Chunk
-from ragmed_retrieval.embedding import Vectors, l2_normalize
+from ragmed_retrieval.embedding import l2_normalize
 from ragmed_retrieval.evalset import EvalQuery
 from ragmed_retrieval.metrics import RetrievalScores
-
-
-class HashingEmbedder:
-    """Deterministic bag-of-words embedder: enough signal to rank obvious matches."""
-
-    name = "test/hashing"
-
-    def __init__(self) -> None:
-        self.document_calls = 0
-
-    def _embed(self, texts: Sequence[str]) -> Vectors:
-        vectors = np.zeros((len(texts), 64), dtype=np.float32)
-        for row, text in enumerate(texts):
-            for word in re.findall(r"[a-z]+", text.lower()):
-                vectors[row, int(hashlib.md5(word.encode()).hexdigest(), 16) % 64] += 1  # noqa: S324
-        return l2_normalize(vectors)
-
-    def embed_documents(self, texts: Sequence[str]) -> Vectors:
-        self.document_calls += 1
-        return self._embed(texts)
-
-    def embed_queries(self, texts: Sequence[str]) -> Vectors:
-        return self._embed(texts)
-
+from ragmed_retrieval.testing import HashingEmbedder
 
 CHUNKS = [
     Chunk("p1:0", "p1", 0, "symptoms", "q", "asthma causes wheezing and shortness of breath"),

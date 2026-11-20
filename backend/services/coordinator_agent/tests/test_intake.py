@@ -16,6 +16,7 @@ def test_merge_appends_new_facts_and_skips_non_answers() -> None:
         CaseUpdate(field="onset", value="a month ago"),
         CaseUpdate(field="duration", value="unknown"),
         CaseUpdate(field="allergies", value="  "),
+        CaseUpdate(field="pattern", value="?"),
         CaseUpdate(field="age", value="34"),
     ])  # fmt: skip
 
@@ -35,6 +36,9 @@ def test_similar_questions_count_as_repeats() -> None:
     assert is_repeat("How long does each headache episode last?", asked)
     assert not is_repeat("How long does each headache episode last?", asked[:1])
     assert not is_repeat("Do you take any medications?", asked)
+    # Rewordings seen live count too.
+    assert is_repeat("How long does each individual headache episode last, in hours?", asked)
+    assert not is_repeat("When did the headaches first start?", asked)
 
 
 def test_quick_replies_are_short_and_few() -> None:

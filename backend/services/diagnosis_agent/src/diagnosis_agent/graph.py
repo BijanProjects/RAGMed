@@ -26,6 +26,8 @@ from diagnosis_agent.schema import (
 from ragmed_core.clinic import GENERAL_PHYSICIAN
 
 TOP_K = 5
+CONDITION_K = 2
+MAX_PASSAGES = 6
 MAX_SEARCHES = 2
 NO_EVIDENCE_REASON = "No matching sources were found, so a full assessment is needed."
 INSUFFICIENT = (
@@ -42,10 +44,22 @@ MIN_LABEL = 20  # questions shorter than this rarely say what they are about
 class State(TypedDict, total=False):
     question: str
     query: str
+    condition: str
     searches: int
     passages: list[Passage]
     draft: DiagnosisAnswer | None
     result: DiagnosisResult
+
+
+def merge_passages(first: list[Passage], then: list[Passage]) -> list[Passage]:
+    """Both lists in order, each answer once, at most `MAX_PASSAGES`."""
+    seen: set[str] = set()
+    merged: list[Passage] = []
+    for passage in [*first, *then]:
+        if passage.answer_id not in seen:
+            seen.add(passage.answer_id)
+            merged.append(passage)
+    return merged[:MAX_PASSAGES]
 
 
 def number_passages(passages: list[Passage], only: set[int] | None = None) -> str:
@@ -135,11 +149,22 @@ def finalise(draft: DiagnosisAnswer, passages: list[Passage], query: str) -> Dia
 def build_graph(knowledge: Knowledge, reasoner: Reasoner) -> CompiledStateGraph[Any]:
     async def rewrite(state: State) -> State:
         previous = state.get("query") if state.get("searches") else None
-        query = await reasoner.search_query(state["question"], previous)
-        return {"query": query, "searches": state.get("searches", 0) + 1}
+        search = await reasoner.search_query(state["question"], previous)
+        return {
+            "query": search.query,
+            "condition": search.condition.strip(),
+            "searches": state.get("searches", 0) + 1,
+        }
 
     async def retrieve(state: State) -> State:
-        return {"passages": await knowledge.search(state["query"], TOP_K)}
+        passages = await knowledge.search(state["query"], TOP_K)
+        if state.get("condition"):
+            # Detailed queries can rank rare variants above the common condition's own page
+            # (e.g. "migraine with aura" finds hemiplegic migraine first), so its plain name is
+            # searched too, and those passages lead.
+            named = await knowledge.search(state["condition"], CONDITION_K)
+            passages = merge_passages(named, passages)
+        return {"passages": passages}
 
     async def generate(state: State) -> State:
         if not state["passages"]:

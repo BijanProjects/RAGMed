@@ -28,6 +28,10 @@ class GroundingCheck(BaseModel):
 
 class SearchQuery(BaseModel):
     query: str = Field(description="A self-contained medical search query.")
+    condition: str = Field(
+        description="The single most likely common condition, by its plain name (for example "
+        "'migraine'), or empty if unclear."
+    )
 
 
 class DiagnosisAnswer(BaseModel):

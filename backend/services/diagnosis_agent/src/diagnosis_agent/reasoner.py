@@ -9,9 +9,10 @@ from diagnosis_agent.schema import DiagnosisAnswer, GroundingCheck, SearchQuery
 from ragmed_llm import ask_structured
 
 REWRITE = """Turn the patient's message into one self-contained search query for a medical
-knowledge base of consumer health questions and answers (MedQuAD). Name the condition or
-symptoms explicitly. If a previous query found nothing useful, try different wording, for example
-the likely condition instead of the symptoms."""
+knowledge base of consumer health questions and answers (MedQuAD). If the symptoms point to a
+common condition, start the query with its name (for example "migraine" for one-sided throbbing
+headaches with nausea), then the key symptoms; the knowledge base files answers under condition
+names. If a previous query found nothing useful, try different wording."""
 
 CHECK = """You are checking an answer against its numbered sources. List every sentence of the
 answer that states a medical fact the passages do not support, copied exactly. Do not list
@@ -20,7 +21,7 @@ fact is supported, return an empty list."""
 
 
 class Reasoner(Protocol):
-    async def search_query(self, question: str, previous: str | None) -> str: ...
+    async def search_query(self, question: str, previous: str | None) -> SearchQuery: ...
 
     async def answer(self, instructions: str) -> DiagnosisAnswer: ...
 
@@ -41,11 +42,11 @@ class LlmReasoner:
         self._small = list(small)
         self._large = list(large)
 
-    async def search_query(self, question: str, previous: str | None) -> str:
+    async def search_query(self, question: str, previous: str | None) -> SearchQuery:
         user = f"Patient's message:\n{question}"
         if previous:
             user += f"\n\nThis query did not find enough: {previous}"
-        return (await ask_structured(self._small, SearchQuery, REWRITE, user)).query
+        return await ask_structured(self._small, SearchQuery, REWRITE, user)
 
     async def answer(self, instructions: str) -> DiagnosisAnswer:
         system = "Return the answer in the requested structure."

@@ -122,7 +122,7 @@ NON_ANSWERS = {
 }  # fmt: skip
 SINGLE_VALUE: set[str] = {"main_problem", "age", "sex"}  # the first answer stands
 MAX_REPEATS = 2
-SIMILAR = 0.75  # SequenceMatcher ratio above which two questions count as the same
+SIMILAR = 0.65  # rewordings measured 0.62-0.92 apart; distinct questions at most 0.61
 
 
 def merge(case: Mapping[str, str], updates: Sequence[CaseUpdate]) -> dict[str, str]:
@@ -130,7 +130,8 @@ def merge(case: Mapping[str, str], updates: Sequence[CaseUpdate]) -> dict[str, s
     merged = dict(case)
     for update in updates:
         value = update.value.strip()
-        if not value or value.casefold().strip(" .") in NON_ANSWERS:
+        meaningless = not any(c.isalnum() for c in value)  # "?", "-", "..."
+        if not value or meaningless or value.casefold().strip(" .") in NON_ANSWERS:
             continue
         previous = merged.get(update.field)
         if previous and update.field in SINGLE_VALUE:

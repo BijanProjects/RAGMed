@@ -7,6 +7,7 @@ from diagnosis_agent.graph import (
     finalise,
     insufficient_result,
     label,
+    merge_passages,
     number_passages,
     remove_doses,
     remove_sentences,
@@ -221,3 +222,21 @@ def test_sources_without_a_subject_show_the_passages_opening_words() -> None:
 
     assert label(generic).startswith("Who is at risk for? Measles: make sure")
     assert label(PASSAGES[1]) == "How is asthma treated?"
+
+
+async def test_the_likely_conditions_own_page_is_searched_and_leads() -> None:
+    common = PASSAGES[1].model_copy(update={"answer_id": "common", "question": "What is asthma?"})
+    knowledge = FakeKnowledge([PASSAGES, [common, PASSAGES[0]]])
+
+    result = await run(knowledge, FakeReasoner(answerable=[True], condition="asthma"))
+
+    assert knowledge.queries == ["query 1", "asthma"]
+    assert result.sufficient_evidence
+
+
+def test_merged_passages_keep_order_without_repeats_and_are_capped() -> None:
+    many = [PASSAGES[0].model_copy(update={"answer_id": f"a{n}"}) for n in range(10)]
+
+    merged = merge_passages([many[3], many[0]], many)
+
+    assert [p.answer_id for p in merged] == ["a3", "a0", "a1", "a2", "a4", "a5"]

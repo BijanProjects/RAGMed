@@ -3,7 +3,7 @@ VENV   := .venv
 BIN    := $(VENV)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help venv install install-bench lock lint format typecheck test check clean search report significance
+.PHONY: help venv install install-bench lock lint format typecheck test check clean search report significance export-onnx benchmark-all mcp-ingest mcp-serve
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -46,6 +46,19 @@ check: lint typecheck test ## Everything CI runs
 Q ?= What are the symptoms of asthma?
 search: ## Ask the knowledge base a question on CPU with BGE-M3:  make search Q="..."
 	$(BIN)/python -m ragmed_retrieval search "$(Q)"
+
+export-onnx: ## Export BGE-M3 to int8 ONNX for fast CPU search (needs install-bench)
+	$(BIN)/python -m ragmed_retrieval export-onnx
+
+benchmark-all: ## Re-run every experiment (~1 h on a GPU); progress: tail -f data/artifacts/benchmark.log
+	evals/run_all.sh
+
+VECTORS ?= $(firstword $(wildcard data/artifacts/embeddings/BAAI__bge-m3-*.npy))
+mcp-ingest: ## Load the knowledge base into the local vector store (needs make search or benchmark first)
+	$(BIN)/python -m mcp_medical ingest $(if $(VECTORS),--vectors $(VECTORS))
+
+mcp-serve: ## Run the Medical Knowledge MCP server on http://127.0.0.1:9001/mcp
+	$(BIN)/python -m mcp_medical serve
 
 report: ## Print the embedding benchmark results table
 	$(BIN)/python -m ragmed_retrieval report

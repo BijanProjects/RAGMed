@@ -1,0 +1,21 @@
+[project]
+name = "ragmed-mcp-medical"
+version = "0.1.0"
+description = "MCP server exposing RAGMed's medical knowledge base as read-only tools."
+requires-python = ">=3.12"
+dependencies = [
+  "fastmcp>=4.2,<5",
+  "ragmed-core",
+  "ragmed-retrieval[onnx]",
+  "ragmed-vectorstores[qdrant]",
+]
+
+[project.scripts]
+mcp-medical = "mcp_medical.__main__:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_medical"]

@@ -1,0 +1,17 @@
+[project]
+name = "ragmed-a2a"
+version = "0.1.0"
+description = "Shared A2A plumbing for RAGMed agents: server app, bearer auth, and a client."
+requires-python = ">=3.12"
+dependencies = [
+  "a2a-sdk[http-server]>=1.3,<2",
+  "httpx>=0.27",
+  "starlette>=0.40",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ragmed_a2a"]

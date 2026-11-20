@@ -16,9 +16,11 @@ ignore = ["PLR0913"]
 "**/tests/**" = ["S101", "PLR2004", "ARG"]
 # The shared adapter test suite ships inside the package so other adapters can reuse it.
 "**/ragmed_vectorstores/contract.py" = ["S101", "PLR2004", "ARG"]
+# Test fakes implement real interfaces, so they accept arguments they do not use.
+"**/testing.py" = ["ARG"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ragmed_*", "mcp_*"]
+known-first-party = ["ragmed_*", "mcp_*", "diagnosis_agent", "coordinator_agent"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -32,7 +34,9 @@ mypy_path = [
   "packages/ragmed_core/src",
   "packages/ragmed_retrieval/src",
   "packages/ragmed_vectorstores/src",
+  "packages/ragmed_a2a/src",
   "services/mcp_medical/src",
+  "services/diagnosis_agent/src",
 ]
 explicit_package_bases = true
 exclude = ["^legacy/"]
@@ -49,14 +53,23 @@ pythonpath = [
   "packages/ragmed_core/src",
   "packages/ragmed_retrieval/src",
   "packages/ragmed_vectorstores/src",
+  "packages/ragmed_a2a/src",
   "services/mcp_medical/src",
+  "services/diagnosis_agent/src",
 ]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
 filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
-source = ["ragmed_core", "ragmed_retrieval", "ragmed_vectorstores", "mcp_medical"]
+source = [
+  "ragmed_core",
+  "ragmed_retrieval",
+  "ragmed_vectorstores",
+  "ragmed_a2a",
+  "mcp_medical",
+  "diagnosis_agent",
+]
 
 [tool.coverage.report]
 fail_under = 80

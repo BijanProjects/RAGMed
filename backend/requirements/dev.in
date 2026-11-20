@@ -2,7 +2,9 @@
 -e packages/ragmed_core
 -e packages/ragmed_retrieval[bm25,onnx]
 -e packages/ragmed_vectorstores[qdrant]
+-e packages/ragmed_a2a
 -e services/mcp_medical
+-e services/diagnosis_agent
 
 mypy
 onnx  # builds tiny ONNX models in tests

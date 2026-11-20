@@ -2,6 +2,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -34,6 +35,18 @@ class CoreSettings(BaseSettings):
         if self.log_json is not None:
             return self.log_json
         return self.environment is not Environment.LOCAL
+
+
+class ProviderKeys(BaseSettings):
+    """Model provider API keys, under their usual names (no RAGMED_ prefix).
+
+    Read from the environment, the repository's .env, or backend/.env.
+    """
+
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore", frozen=True)
+
+    groq_api_key: SecretStr | None = None
+    google_api_key: SecretStr | None = None
 
 
 @lru_cache(maxsize=1)

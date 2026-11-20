@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { ChatEvent, ReplyData } from "./types";
+import type { ChatAction, ChatEvent, ReplyData } from "./types";
 
 // Server-side only: the browser never sees the backend URL or its token.
 const COORDINATOR_URL = process.env.COORDINATOR_URL ?? "http://127.0.0.1:8000";
@@ -52,12 +52,13 @@ async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<unkn
 }
 
 /**
- * Send one message to the Care Coordinator over A2A (JSON-RPC, streamed) and yield its
- * progress, then exactly one reply or error.
+ * Send one message (text, a button action, or both) to the Care Coordinator over A2A
+ * (JSON-RPC, streamed) and yield its progress, then exactly one reply or error.
  */
 export async function* askCoordinator(
   message: string,
   contextId?: string,
+  action?: ChatAction,
 ): AsyncGenerator<ChatEvent> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -74,7 +75,11 @@ export async function* askCoordinator(
       message: {
         messageId: crypto.randomUUID(),
         role: "ROLE_USER",
-        parts: [{ text: message }],
+        // A2A refuses empty text parts: a button press with no text sends only its data.
+        parts: [
+          ...(message ? [{ text: message }] : []),
+          ...(action ? [{ data: { action } }] : []),
+        ],
         ...(contextId ? { contextId } : {}),
       },
       configuration: {},

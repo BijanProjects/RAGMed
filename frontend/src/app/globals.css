@@ -26,6 +26,11 @@ body {
 }
 
 /* Markdown inside chat replies */
+.prose-chat h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
 .prose-chat p + p,
 .prose-chat p + ol,
 .prose-chat p + ul,

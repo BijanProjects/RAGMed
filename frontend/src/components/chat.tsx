@@ -1,9 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
-import type { ChatEvent, ReplyData } from "@/lib/types";
+import type { Appointment, ChatAction, ChatEvent, Offer, ReplyData, Slot } from "@/lib/types";
+
+const CLINIC_TIME_ZONE = process.env.NEXT_PUBLIC_CLINIC_TIME_ZONE ?? "America/St_Johns";
 
 interface Message {
   id: string;
@@ -15,27 +18,51 @@ interface Message {
   failed?: boolean;
 }
 
+interface Outgoing {
+  text?: string;
+  action?: ChatAction;
+  label?: string; // what the patient's bubble shows for a button press
+}
+
 const EXAMPLES = [
-  "How is asthma treated?",
-  "My 4-year-old has had a high fever and a red rash for two days",
-  "What are the early signs of type 2 diabetes?",
-  "I get headaches behind my eyes every afternoon",
+  "I've had headaches on one side for a month",
+  "My 3-year-old has a fever and a rash",
+  "I need to renew my blood pressure prescription",
+  "What causes asthma?",
 ];
 
 const URGENCY: Record<string, { label: string; style: string }> = {
   self_care: { label: "Self-care", style: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200" },
-  routine: { label: "See a clinician soon", style: "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200" },
-  urgent: { label: "See a clinician today", style: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200" },
+  routine: { label: "Routine", style: "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200" },
+  urgent: { label: "Urgent: today", style: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200" },
   emergency: { label: "Emergency", style: "bg-red-600 text-white" },
 };
 
+const dayFormat = new Intl.DateTimeFormat("en-CA", {
+  timeZone: CLINIC_TIME_ZONE,
+  weekday: "long",
+  month: "long",
+  day: "numeric",
+});
+const timeFormat = new Intl.DateTimeFormat("en-CA", {
+  timeZone: CLINIC_TIME_ZONE,
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+export function formatWhen(iso: string): string {
+  const moment = new Date(iso);
+  return `${dayFormat.format(moment)}, ${timeFormat.format(moment)}`;
+}
+
 async function* readEvents(response: Response): AsyncGenerator<ChatEvent> {
-  const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
   let buffer = "";
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    buffer += value;
+    buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) if (line.trim()) yield JSON.parse(line) as ChatEvent;
@@ -56,15 +83,15 @@ export function Chat() {
   const update = (id: string, change: (m: Message) => Message) =>
     setMessages((all) => all.map((m) => (m.id === id ? change(m) : m)));
 
-  async function send(text: string) {
+  async function send({ text = "", action, label }: Outgoing) {
     const message = text.trim();
-    if (!message || busy) return;
+    if ((!message && !action) || busy) return;
     setInput("");
     setBusy(true);
     const replyId = crypto.randomUUID();
     setMessages((all) => [
       ...all,
-      { id: crypto.randomUUID(), role: "patient", text: message, progress: [], pending: false },
+      { id: crypto.randomUUID(), role: "patient", text: label ?? message, progress: [], pending: false },
       { id: replyId, role: "assistant", text: "", progress: [], pending: true },
     ]);
 
@@ -72,7 +99,7 @@ export function Chat() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, contextId }),
+        body: JSON.stringify({ message, contextId, action }),
       });
       if (!response.ok || !response.body) {
         const error = await response.json().catch(() => ({ error: "Request failed." }));
@@ -107,18 +134,22 @@ export function Chat() {
     setContextId(undefined);
   }
 
+  const latest = messages.at(-1)?.id;
+
   return (
     <div className="mx-auto flex h-dvh w-full max-w-3xl flex-col px-4">
-      <header className="flex items-center justify-between border-b border-black/10 py-4 dark:border-white/10">
+      <header className="flex items-center justify-between gap-4 border-b border-black/10 py-4 dark:border-white/10">
         <div>
-          <h1 className="text-lg font-semibold">RAGMed</h1>
-          <p className="text-sm text-neutral-500">Health questions answered from NIH sources, with citations</p>
+          <h1 className="text-lg font-semibold">RAGMed Clinic</h1>
+          <p className="text-sm text-neutral-500">
+            Tell us what&apos;s wrong. We ask a few questions, draft a note for your clinician, and book your visit.
+          </p>
         </div>
         {messages.length > 0 && (
           <button
             onClick={restart}
             disabled={busy}
-            className="rounded-lg border border-black/15 px-3 py-1.5 text-sm hover:bg-black/5 disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/10"
+            className="shrink-0 rounded-lg border border-black/15 px-3 py-1.5 text-sm hover:bg-black/5 disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/10"
           >
             New conversation
           </button>
@@ -128,12 +159,12 @@ export function Chat() {
       <main className="flex-1 space-y-6 overflow-y-auto py-6" aria-live="polite">
         {messages.length === 0 ? (
           <div className="space-y-4 pt-10 text-center">
-            <p className="text-neutral-500">Describe a symptom or ask a health question.</p>
+            <p className="text-neutral-500">What would you like to be seen for?</p>
             <div className="grid gap-2 sm:grid-cols-2">
               {EXAMPLES.map((example) => (
                 <button
                   key={example}
-                  onClick={() => send(example)}
+                  onClick={() => send({ text: example })}
                   className="rounded-xl border border-black/10 p-3 text-left text-sm hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
                 >
                   {example}
@@ -142,7 +173,14 @@ export function Chat() {
             </div>
           </div>
         ) : (
-          messages.map((message) => <Bubble key={message.id} message={message} />)
+          messages.map((message) => (
+            <Bubble
+              key={message.id}
+              message={message}
+              active={message.id === latest && !busy}
+              onSend={send}
+            />
+          ))
         )}
         <div ref={endRef} />
       </main>
@@ -150,7 +188,7 @@ export function Chat() {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          send(input);
+          send({ text: input });
         }}
         className="flex gap-2 border-t border-black/10 py-4 dark:border-white/10"
       >
@@ -164,12 +202,12 @@ export function Chat() {
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              send(input);
+              send({ text: input });
             }
           }}
           rows={1}
           maxLength={2000}
-          placeholder="Describe your symptoms or ask a question…"
+          placeholder="Type your answer or describe your symptoms…"
           className="min-h-11 flex-1 resize-none rounded-xl border border-black/15 bg-transparent px-4 py-2.5 outline-none focus:border-sky-500 dark:border-white/15"
         />
         <button
@@ -181,13 +219,25 @@ export function Chat() {
         </button>
       </form>
       <p className="pb-3 text-center text-xs text-neutral-500">
-        Educational project, not a medical device. In an emergency, call your local emergency number.
+        Educational demo, not a medical device. Please don&apos;t enter real personal health data. In an emergency,
+        call your local emergency number. ·{" "}
+        <Link href="/clinician" className="underline hover:text-neutral-700 dark:hover:text-neutral-300">
+          Clinician view
+        </Link>
       </p>
     </div>
   );
 }
 
-function Bubble({ message }: { message: Message }) {
+function Bubble({
+  message,
+  active,
+  onSend,
+}: {
+  message: Message;
+  active: boolean;
+  onSend: (outgoing: Outgoing) => void;
+}) {
   if (message.role === "patient") {
     return (
       <div className="flex justify-end">
@@ -200,17 +250,21 @@ function Bubble({ message }: { message: Message }) {
 
   const data = message.data;
   const emergency = data?.kind === "emergency" || data?.urgency === "emergency";
+  const booked = data?.kind === "booked";
   const urgency = data?.urgency ? URGENCY[data.urgency] : undefined;
+  const showBadge = urgency && (data?.kind === "report" || data?.kind === "answer" || emergency);
 
   return (
-    <div className="flex">
+    <div className="flex" data-kind={data?.kind ?? (message.pending ? "pending" : "error")}>
       <div
-        className={`max-w-[95%] space-y-3 rounded-2xl rounded-bl-sm px-4 py-3 ${
+        className={`w-full max-w-[95%] space-y-3 rounded-2xl rounded-bl-sm px-4 py-3 ${
           emergency
             ? "border-2 border-red-600 bg-red-50 dark:bg-red-950/40"
-            : message.failed
-              ? "border border-amber-400/60 bg-amber-50 dark:bg-amber-950/30"
-              : "bg-black/[0.04] dark:bg-white/[0.06]"
+            : booked
+              ? "border border-emerald-500/60 bg-emerald-50 dark:bg-emerald-950/30"
+              : message.failed
+                ? "border border-amber-400/60 bg-amber-50 dark:bg-amber-950/30"
+                : "bg-black/[0.04] dark:bg-white/[0.06]"
         }`}
       >
         {message.pending && (
@@ -219,17 +273,190 @@ function Bubble({ message }: { message: Message }) {
             {message.progress.at(-1) ?? "Thinking"}…
           </p>
         )}
-        {urgency && data?.kind !== "greeting" && (
+        {showBadge && (
           <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${urgency.style}`}>
             {urgency.label}
           </span>
         )}
-        {message.text && (
-          <div className="prose-chat text-[15px] leading-relaxed">
-            <ReactMarkdown>{message.text}</ReactMarkdown>
-          </div>
+        {booked && data?.appointment ? (
+          <BookedCard appointment={data.appointment} />
+        ) : (
+          message.text && (
+            <div className="prose-chat text-[15px] leading-relaxed">
+              <ReactMarkdown>{message.text}</ReactMarkdown>
+            </div>
+          )
+        )}
+        {data?.kind === "question" && data.quick_replies.length > 0 && (
+          <QuickReplies replies={data.quick_replies} active={active} onSend={onSend} />
+        )}
+        {data?.kind === "report" && data.offer && (
+          <OfferButtons offer={data.offer} active={active} onSend={onSend} />
+        )}
+        {data?.kind === "slots" && data.offer && (
+          <SlotPicker slots={data.slots} offer={data.offer} active={active} onSend={onSend} />
         )}
       </div>
+    </div>
+  );
+}
+
+const chip =
+  "rounded-full border border-sky-600/40 px-3 py-1 text-sm text-sky-800 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-sky-200 dark:hover:bg-sky-950";
+const primary =
+  "rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40";
+const secondary =
+  "rounded-xl border border-black/15 px-4 py-2 text-sm hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:hover:bg-white/10";
+
+function QuickReplies({
+  replies,
+  active,
+  onSend,
+}: {
+  replies: string[];
+  active: boolean;
+  onSend: (outgoing: Outgoing) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Suggested answers">
+      {replies.map((reply) => (
+        <button key={reply} className={chip} disabled={!active} onClick={() => onSend({ text: reply })}>
+          {reply}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OfferButtons({
+  offer,
+  active,
+  onSend,
+}: {
+  offer: Offer;
+  active: boolean;
+  onSend: (outgoing: Outgoing) => void;
+}) {
+  const minutes = Math.round(offer.visit_minutes);
+  return (
+    <div className="flex flex-wrap gap-2 border-t border-black/10 pt-3 dark:border-white/10">
+      <button
+        className={primary}
+        disabled={!active}
+        onClick={() =>
+          onSend({ action: { type: "show_slots" }, label: `Show times with ${offer.clinician_type}` })
+        }
+      >
+        See available times · {minutes} min with {offer.clinician_type}
+      </button>
+      {offer.alternative && (
+        <button
+          className={secondary}
+          disabled={!active}
+          onClick={() =>
+            onSend({
+              action: { type: "show_slots", clinician_type: offer.alternative! },
+              label: `Show times with a ${offer.alternative!.toLowerCase()}`,
+            })
+          }
+        >
+          A {offer.alternative.toLowerCase()} instead
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SlotPicker({
+  slots,
+  offer,
+  active,
+  onSend,
+}: {
+  slots: Slot[];
+  offer: Offer;
+  active: boolean;
+  onSend: (outgoing: Outgoing) => void;
+}) {
+  const [chosen, setChosen] = useState<Slot | null>(null);
+  const days = new Map<string, Slot[]>();
+  for (const slot of slots) {
+    const day = dayFormat.format(new Date(slot.start));
+    days.set(day, [...(days.get(day) ?? []), slot]);
+  }
+  const minutes = Math.round(offer.visit_minutes);
+
+  return (
+    <div className="space-y-3 border-t border-black/10 pt-3 dark:border-white/10">
+      {[...days.entries()].map(([day, daySlots]) => (
+        <div key={day}>
+          <p className="mb-1.5 text-sm font-medium">{day}</p>
+          <div className="flex flex-wrap gap-2">
+            {daySlots.map((slot) => (
+              <button
+                key={slot.start}
+                disabled={!active}
+                onClick={() => setChosen(slot)}
+                aria-pressed={chosen?.start === slot.start}
+                className={`rounded-lg border px-3 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+                  chosen?.start === slot.start
+                    ? "border-sky-600 bg-sky-600 text-white"
+                    : "border-black/15 hover:border-sky-500 dark:border-white/15"
+                }`}
+              >
+                <span className="font-medium">{timeFormat.format(new Date(slot.start))}</span>
+                <span className="block text-xs opacity-75">{slot.physician}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      {chosen && active && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-sky-50 p-3 dark:bg-sky-950/40" role="dialog" aria-label="Confirm booking">
+          <p className="flex-1 text-sm">
+            Book <strong>{formatWhen(chosen.start)}</strong> with {chosen.physician} ({chosen.clinician_type},{" "}
+            {minutes} min)?
+          </p>
+          <button
+            className={primary}
+            onClick={() =>
+              onSend({
+                action: { type: "book", start: chosen.start, clinician_type: chosen.clinician_type },
+                label: `Book ${formatWhen(chosen.start)} with ${chosen.physician}`,
+              })
+            }
+          >
+            Confirm booking
+          </button>
+          <button className={secondary} onClick={() => setChosen(null)}>
+            Choose another
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BookedCard({ appointment }: { appointment: Appointment }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-base font-semibold text-emerald-800 dark:text-emerald-300">Your visit is booked</p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+        <dt className="text-neutral-500">When</dt>
+        <dd>{formatWhen(appointment.start)}</dd>
+        <dt className="text-neutral-500">With</dt>
+        <dd>
+          {appointment.physician} · {appointment.clinician_type}
+        </dd>
+        <dt className="text-neutral-500">Length</dt>
+        <dd>{Math.round(appointment.minutes)} minutes</dd>
+        <dt className="text-neutral-500">Reference</dt>
+        <dd className="font-mono font-semibold">{appointment.reference}</dd>
+      </dl>
+      <p className="text-sm text-neutral-600 dark:text-neutral-400">
+        Your draft pre-visit report has been sent to {appointment.physician}. It is not a diagnosis; your clinician
+        will assess you at the visit.
+      </p>
     </div>
   );
 }

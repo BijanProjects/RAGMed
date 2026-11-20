@@ -35,8 +35,10 @@ mypy_path = [
   "packages/ragmed_retrieval/src",
   "packages/ragmed_vectorstores/src",
   "packages/ragmed_a2a/src",
+  "packages/ragmed_llm/src",
   "services/mcp_medical/src",
   "services/diagnosis_agent/src",
+  "services/coordinator_agent/src",
 ]
 explicit_package_bases = true
 exclude = ["^legacy/"]
@@ -54,8 +56,10 @@ pythonpath = [
   "packages/ragmed_retrieval/src",
   "packages/ragmed_vectorstores/src",
   "packages/ragmed_a2a/src",
+  "packages/ragmed_llm/src",
   "services/mcp_medical/src",
   "services/diagnosis_agent/src",
+  "services/coordinator_agent/src",
 ]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
 filterwarnings = ["error"]
@@ -67,8 +71,10 @@ source = [
   "ragmed_retrieval",
   "ragmed_vectorstores",
   "ragmed_a2a",
+  "ragmed_llm",
   "mcp_medical",
   "diagnosis_agent",
+  "coordinator_agent",
 ]
 
 [tool.coverage.report]

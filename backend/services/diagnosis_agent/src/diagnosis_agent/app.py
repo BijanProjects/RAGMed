@@ -11,7 +11,7 @@ from diagnosis_agent.graph import build_graph
 from diagnosis_agent.knowledge import Knowledge, McpKnowledge
 from diagnosis_agent.reasoner import LlmReasoner, Reasoner
 from ragmed_a2a.server import CardSpec, Skill, agent_card, create_app
-from ragmed_core.settings import CoreSettings, Environment, ProviderKeys
+from ragmed_core.settings import CoreSettings, Environment
 
 
 class DiagnosisSettings(CoreSettings):
@@ -57,25 +57,11 @@ CARD = CardSpec(
 
 
 def _groq_reasoner(settings: DiagnosisSettings) -> Reasoner:  # pragma: no cover - needs a key
-    from langchain_groq import ChatGroq  # noqa: PLC0415
-
-    key = ProviderKeys().groq_api_key
-    if key is None:
-        raise RuntimeError("GROQ_API_KEY is not set (put it in the repository's .env)")
-
-    def model(name: str, effort: str) -> ChatGroq:
-        return ChatGroq(
-            model_name=name,
-            groq_api_key=key,
-            temperature=0,
-            max_retries=0,  # fail fast on a rate limit; the next model takes over
-            request_timeout=60,
-            reasoning_effort=effort if "gpt-oss" in name else None,  # only gpt-oss takes one
-        )
+    from ragmed_llm.groq import groq_models  # noqa: PLC0415
 
     return LlmReasoner(
-        small=[model(m, settings.small_reasoning) for m in settings.small_models],
-        large=[model(m, settings.large_reasoning) for m in settings.large_models],
+        small=groq_models(settings.small_models, settings.small_reasoning),
+        large=groq_models(settings.large_models, settings.large_reasoning),
     )
 
 

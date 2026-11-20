@@ -9,7 +9,9 @@ dependencies = [
   "langchain-core>=1.8,<2",
   "langchain-groq>=1.2,<2",
   "langgraph>=1.2,<2",
+  "ragmed-a2a",
   "ragmed-core",
+  "ragmed-llm",
   "uvicorn>=0.30",
 ]
 

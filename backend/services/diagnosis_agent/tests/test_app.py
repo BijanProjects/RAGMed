@@ -3,10 +3,10 @@ import pytest
 
 from diagnosis_agent.app import DiagnosisSettings, create_diagnosis_app
 from diagnosis_agent.executor import AT_CAPACITY
-from diagnosis_agent.reasoner import AtCapacityError
 from diagnosis_agent.testing import PASSAGES, FakeKnowledge, FakeReasoner
 from ragmed_a2a.client import Progress, RemoteAgent, Reply
 from ragmed_core.settings import Environment
+from ragmed_llm import AtCapacityError
 
 pytestmark = pytest.mark.anyio
 BASE = "http://diagnosis.test"

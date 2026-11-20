@@ -9,9 +9,9 @@ from a2a.server.events import EventQueue
 from a2a.types import TaskState
 from langgraph.graph.state import CompiledStateGraph
 
-from diagnosis_agent.reasoner import AtCapacityError
 from diagnosis_agent.schema import DiagnosisResult
 from ragmed_a2a.server import start_task
+from ragmed_llm import AtCapacityError
 
 log = structlog.get_logger()
 

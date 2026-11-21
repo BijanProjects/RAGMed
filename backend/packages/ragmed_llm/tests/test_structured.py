@@ -1,12 +1,14 @@
+from types import SimpleNamespace
 from typing import Any, cast
 
 import anyio
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableLambda
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
-from ragmed_llm import AtCapacityError, ask_structured, retry_after
+from ragmed_llm import AtCapacityError, ask_structured, is_rate_limit, retry_after
+from ragmed_llm.gemini import gemini_models
 
 pytestmark = pytest.mark.anyio
 
@@ -91,3 +93,52 @@ async def test_other_errors_are_not_disguised_as_capacity() -> None:
 async def test_at_least_one_model_is_required() -> None:
     with pytest.raises(ValueError, match="at least one"):
         await ask()
+
+
+class GoogleQuotaError(Exception):
+    """Shaped like google.genai.errors.ClientError for a used-up free-tier quota."""
+
+    code = 429
+
+
+def test_googles_rate_limits_are_recognised() -> None:
+    assert is_rate_limit(GoogleQuotaError("quota"))
+    assert is_rate_limit(Exception("429 RESOURCE_EXHAUSTED. Please retry in 33.4s."))
+    assert not is_rate_limit(Exception("400 INVALID_ARGUMENT"))
+    assert retry_after(Exception("RESOURCE_EXHAUSTED. Please retry in 33.4s.")) == 33.4
+
+
+async def test_a_backup_model_answers_when_every_groq_model_is_busy() -> None:
+    groq_a = model(RateLimitedError("busy"), RateLimitedError("busy"))
+    groq_b = model(RateLimitedError("busy"), RateLimitedError("busy"))
+    gemini = model({"query": "migraine"})
+
+    assert await ask(groq_a, groq_b, gemini) == "migraine"
+
+
+async def test_when_the_backup_is_busy_too_it_reports_capacity() -> None:
+    groq = model(RateLimitedError("try again in 50s"), RateLimitedError("try again in 50s"))
+    gemini = model(GoogleQuotaError("retry in 40s"), GoogleQuotaError("retry in 40s"))
+
+    with pytest.raises(AtCapacityError):
+        await ask(groq, gemini)
+
+
+def test_without_a_google_key_there_is_no_backup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ragmed_llm.gemini.ProviderKeys", lambda: SimpleNamespace(google_api_key=None)
+    )
+
+    assert gemini_models(["gemini-3.5-flash-lite"]) == []
+
+
+def test_with_a_google_key_each_name_becomes_a_fast_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ragmed_llm.gemini.ProviderKeys",
+        lambda: SimpleNamespace(google_api_key=SecretStr("test-only")),
+    )
+
+    models = gemini_models(["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"])
+
+    assert [m.model for m in models] == ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    assert all(m.max_retries == 0 and m.thinking_level == "minimal" for m in models)

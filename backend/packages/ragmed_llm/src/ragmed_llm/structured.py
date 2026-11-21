@@ -1,7 +1,8 @@
 """Ask a chain of models for a typed answer, moving on when one is rate limited.
 
 Groq's free tier allows 8,000 tokens a minute per model, so each role lists several models,
-each with its own budget. A rate-limited or unparseable reply moves straight to the next model.
+each with its own budget, followed by Gemini models as a backup with separate limits. A
+rate-limited or unparseable reply moves straight to the next model.
 If every model is limited but the budget refills within `MAX_RATE_LIMIT_WAIT` seconds, the call
 waits once; otherwise it raises `AtCapacityError`, which agents turn into a polite message.
 """
@@ -16,7 +17,7 @@ from pydantic import BaseModel
 
 MAX_RATE_LIMIT_WAIT = 10.0
 TOO_MANY_REQUESTS = 429
-_TRY_AGAIN = re.compile(r"try again in (\d+(?:\.\d+)?)s", re.IGNORECASE)
+_TRY_AGAIN = re.compile(r"(?:try again|retry) in (\d+(?:\.\d+)?)s", re.IGNORECASE)
 
 
 class AtCapacityError(RuntimeError):
@@ -24,7 +25,10 @@ class AtCapacityError(RuntimeError):
 
 
 def is_rate_limit(error: BaseException) -> bool:
-    return getattr(error, "status_code", None) == TOO_MANY_REQUESTS
+    """Groq sets `status_code`; Google sets `code` or says RESOURCE_EXHAUSTED."""
+    if TOO_MANY_REQUESTS in (getattr(error, "status_code", None), getattr(error, "code", None)):
+        return True
+    return "RESOURCE_EXHAUSTED" in str(error)
 
 
 def retry_after(error: BaseException) -> float | None:

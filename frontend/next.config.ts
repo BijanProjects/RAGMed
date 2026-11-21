@@ -17,6 +17,8 @@ const CONTENT_SECURITY_POLICY = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  // A self-contained server for the Docker image (frontend/Dockerfile): only the files it needs.
+  output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   // Do not generate assistant instruction files (AGENTS.md) during `next dev`.

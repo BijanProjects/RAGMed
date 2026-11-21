@@ -1,4 +1,4 @@
-# The whole backend on one server: four services, Postgres, Valkey, and Caddy for HTTPS.
+# RAGMed on one server: the web app, four backend services, Postgres, Valkey, and Caddy for HTTPS.
 # Only Caddy is reachable from the internet (ports 80 and 443); everything else talks on the
 # private Docker network. Every link between services needs its own token.
 #
@@ -117,19 +117,42 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz')"]
       <<: *health
 
+  web:
+    build:
+      context: ../../frontend
+      args:
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:?}
+    image: ragmed-web
+    restart: unless-stopped
+    environment:
+      COORDINATOR_URL: http://coordinator-agent:8000
+      COORDINATOR_TOKEN: ${TOKEN_WEB:?}
+      SCHEDULING_URL: http://mcp-scheduling:9002
+      CLINICIAN_TOKEN: ${TOKEN_CLINICIAN:?}
+      CLINICIAN_ACCESS_CODE: ${CLINICIAN_ACCESS_CODE:?}
+      SESSION_SECRET: ${SESSION_SECRET:?}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:?}
+    logging: *logging
+    depends_on:
+      coordinator-agent: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      <<: *health
+
   caddy:
     image: caddy:2.10-alpine
     restart: unless-stopped
     ports: ["80:80", "443:443", "443:443/udp"]
     environment:
       API_HOST: ${API_HOST:?}
+      WEB_HOST: ${WEB_HOST:?}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
     logging: *logging
     depends_on:
-      coordinator-agent: { condition: service_healthy }
+      web: { condition: service_healthy }
 
 volumes:
   postgres:

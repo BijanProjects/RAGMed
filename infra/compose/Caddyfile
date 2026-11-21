@@ -1,3 +1,25 @@
+# The web app, with a free Let's Encrypt certificate that Caddy renews by itself. Caddy replaces
+# any X-Forwarded-For header a visitor sends, so the app's rate limits see the real address.
+{$WEB_HOST} {
+	request_body {
+		max_size 64KB
+	}
+
+	reverse_proxy web:3000 {
+		# Chat replies stream while the agents work.
+		flush_interval -1
+	}
+
+	header {
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
 # HTTPS for the backend, with a free Let's Encrypt certificate that Caddy renews by itself.
 # Only three paths are public: /a2a (the Care Coordinator, token required), /clinician/*
 # (the clinician's appointment list, token required) and /healthz. The Diagnosis agent and both

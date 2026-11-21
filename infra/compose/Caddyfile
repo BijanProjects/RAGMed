@@ -1,5 +1,7 @@
-# The web app, with a free Let's Encrypt certificate that Caddy renews by itself. Caddy replaces
-# any X-Forwarded-For header a visitor sends, so the app's rate limits see the real address.
+# The only public site: the web app, with a free Let's Encrypt certificate that Caddy renews by
+# itself. The backend services have no public address; the web app reaches them on the private
+# Docker network. Caddy replaces any X-Forwarded-For header a visitor sends, so the app's rate
+# limits see the real address.
 {$WEB_HOST} {
 	request_body {
 		max_size 64KB
@@ -11,47 +13,6 @@
 	}
 
 	header {
-		-Server
-	}
-
-	log {
-		output stdout
-		format json
-	}
-}
-
-# HTTPS for the backend, with a free Let's Encrypt certificate that Caddy renews by itself.
-# Only three paths are public: /a2a (the Care Coordinator, token required), /clinician/*
-# (the clinician's appointment list, token required) and /healthz. The Diagnosis agent and both
-# MCP servers stay private.
-{$API_HOST} {
-	request_body {
-		max_size 64KB
-	}
-
-	handle /clinician/* {
-		reverse_proxy mcp-scheduling:9002
-	}
-
-	handle /healthz {
-		reverse_proxy coordinator-agent:8000
-	}
-
-	handle /a2a* {
-		reverse_proxy coordinator-agent:8000 {
-			# Replies stream while the agents work.
-			flush_interval -1
-		}
-	}
-
-	# Nothing else is public: not the agent card, not the MCP endpoints.
-	handle {
-		respond 404
-	}
-
-	header {
-		Strict-Transport-Security "max-age=31536000"
-		X-Content-Type-Options nosniff
 		-Server
 	}
 

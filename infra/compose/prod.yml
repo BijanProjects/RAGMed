@@ -1,6 +1,6 @@
 # RAGMed on one server: the web app, four backend services, Postgres, Valkey, and Caddy for HTTPS.
-# Only Caddy is reachable from the internet (ports 80 and 443); everything else talks on the
-# private Docker network. Every link between services needs its own token.
+# Only Caddy is reachable from the internet (ports 80 and 443), and it serves only the web app;
+# everything else talks on the private Docker network. Every link between services needs its own token.
 #
 # Run from the repository root on the server (scripts/deploy.sh does this):
 #   docker compose -f infra/compose/prod.yml --env-file .env.production up -d --build
@@ -96,7 +96,7 @@ services:
     environment:
       RAGMED_SERVICE_NAME: coordinator-agent
       RAGMED_PORT: "8000"
-      RAGMED_PUBLIC_URL: https://${API_HOST:?}
+      RAGMED_PUBLIC_URL: http://coordinator-agent:8000
       RAGMED_DIAGNOSIS_URL: http://diagnosis-agent:8001
       RAGMED_DIAGNOSIS_TOKEN: ${TOKEN_DIAGNOSIS:?}
       RAGMED_SCHEDULING_URL: http://mcp-scheduling:9002/mcp
@@ -144,7 +144,6 @@ services:
     restart: unless-stopped
     ports: ["80:80", "443:443", "443:443/udp"]
     environment:
-      API_HOST: ${API_HOST:?}
       WEB_HOST: ${WEB_HOST:?}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

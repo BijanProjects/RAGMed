@@ -11,7 +11,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT/.env.production"
 KEY="$HOME/.ssh/ragmed_oci"
-API_HOST="${API_HOST:-ragmed-api.bijanroudini.com}"
 WEB_HOST="${WEB_HOST:-ragmed.bijanroudini.com}"
 
 IP="$(terraform -chdir="$ROOT/infra/terraform" output -raw public_ip 2> /dev/null)" \
@@ -28,7 +27,6 @@ if [[ ! -f $ENV_FILE ]]; then
   umask 077
   {
     echo "# Production secrets for RAGMed. Never commit. Created by scripts/deploy.sh."
-    echo "API_HOST=$API_HOST"
     echo "WEB_HOST=$WEB_HOST"
     echo "DATA_DIR=/opt/ragmed/data"
     echo "POSTGRES_PASSWORD=$(secret)"
@@ -77,4 +75,4 @@ echo "  building and starting (first time ~5 minutes)"
   --env-file /opt/ragmed/.env.production up -d --force-recreate --no-deps caddy" > /dev/null 2>&1
 "${SSH[@]}" "cd /opt/ragmed/app && docker compose -f infra/compose/prod.yml \
   --env-file /opt/ragmed/.env.production ps --format '  {{.Service}}: {{.Status}}'"
-echo "  server: $IP   API: https://$API_HOST (needs the DNS record)"
+echo "  server: $IP   site: https://$WEB_HOST"

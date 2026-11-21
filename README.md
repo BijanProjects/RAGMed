@@ -67,7 +67,7 @@ This is the target system. Green parts exist today; the rest is planned.
 ```mermaid
 flowchart LR
     user([Patient in the browser])
-    web["Web app<br/>Next.js on Vercel"]
+    web["Web app<br/>Next.js"]
     coord["Care Coordinator agent<br/>safety check and routing"]
     diag["Diagnosis agent<br/>answers with citations"]
     sched["Scheduling agent<br/>finds and books slots"]
@@ -132,47 +132,52 @@ slots, so every request passes these checks:
 - Conversations are saved in **Postgres** (LangGraph's checkpointer), so a restart or a new
   deployment does not lose them.
 - Only the web app can reach the Coordinator: it sends a service token and the visitor's IP
-  address, which it reads from Vercel's headers.
+  address, which Caddy sets (a visitor cannot fake it).
 - Without `TURNSTILE_SECRET_KEY`, the bot check is off (local development). `make demo` uses
   Cloudflare's published test keys, which always pass.
 
 ## Deployment
 
-Everything runs on free tiers, so the demo can stay online indefinitely at no cost.
+Everything runs on free tiers, so the demo can stay online indefinitely at no cost. The whole app
+lives on one server; only the web app is reachable from the internet.
 
 ```mermaid
 flowchart LR
-    browser([Browser]) -->|HTTPS| vercel["Web app<br/>Vercel Hobby<br/>ragmed.bijanroudini.com"]
+    browser([Browser]) -->|HTTPS| caddy
     browser -.->|bot check| ts["Cloudflare<br/>Turnstile"]
-    vercel -->|"HTTPS + token"| caddy
     subgraph vm["Oracle Cloud Always Free Arm server (4 OCPUs, 24 GB)"]
-        caddy["Caddy<br/>Let's Encrypt"] --> coord["Care Coordinator"]
-        caddy --> sched["Scheduling MCP<br/>(clinician list only)"]
+        caddy["Caddy<br/>Let's Encrypt"] --> web["Web app<br/>Next.js"]
+        web -->|token| coord["Care Coordinator"]
+        web -->|token| sched["Scheduling MCP"]
         coord --> diag["Diagnosis agent"] --> med["Medical MCP<br/>BGE-M3 + Qdrant"]
         coord --> sched
         coord --- pg[("Postgres")]
         coord --- vk[("Valkey")]
     end
-    diag --> groq["Groq<br/>free tier"]
+    diag --> llm["Groq, then Gemini<br/>(free tiers)"]
+    coord --> llm
     sched --> cal["Cal.com"]
     coord --> gmail["Gmail SMTP<br/>booking codes"]
 ```
 
 | Part | Service | Cost |
 | --- | --- | --- |
-| Web app | Vercel Hobby, deployed on every push to `main` | $0 |
-| Backend | Oracle Cloud Always Free: one Arm VM sized exactly to the monthly allowance (3,000 OCPU-hours, 18,000 GB-hours) | $0 |
+| Web app and backend | Oracle Cloud Always Free: one Arm VM sized exactly to the monthly allowance (3,000 OCPU-hours, 18,000 GB-hours) | $0 |
 | HTTPS | Caddy with Let's Encrypt | $0 |
-| Bot check, models, calendar, email | Cloudflare Turnstile, Groq, Cal.com, Gmail | $0 |
+| Language models | Groq, with Gemini (Google AI Studio) as a backup when Groq is busy | $0 |
+| Bot check, calendar, email | Cloudflare Turnstile, Cal.com, Gmail | $0 |
 
 - `make infra` creates or updates the server with Terraform (`infra/terraform/`). It allows SSH
   only from the deployer's current IP address and retries while Oracle has no free Arm capacity.
-- `make deploy` ships the last commit, the search index and the ONNX model, then starts
-  `infra/compose/prod.yml` and waits until every service is healthy. Secrets are generated once
-  into a git-ignored `.env.production`; every link between services has its own token.
-- Only Caddy is reachable from the internet, and it exposes only the Care Coordinator and the
-  clinician list, both behind tokens. The Diagnosis agent, the MCP servers, Postgres and Valkey
-  stay on the private Docker network.
+- `make deploy` ships the last commit, the search index and the ONNX model, builds both images on
+  the server and starts `infra/compose/prod.yml`, waiting until every service is healthy. Secrets
+  are generated once into a git-ignored `.env.production`; every link between services has its
+  own token.
+- The web app used to run on Vercel. It moved to the server so that RAGMed traffic, including
+  any abuse, can never use up the Vercel allowance of other sites in the same account, and so the
+  backend needs no public address at all.
+- Daily ceilings for the whole demo (messages, verification emails, bookings) keep the free
+  model quota and the clinic's Gmail account safe even from many addresses at once.
 
 ## Project structure
 
@@ -238,8 +243,8 @@ RAGMed/
 
 An earlier plan put `apps/`, `services/` and `packages/` at the top of the repository. Grouping by
 language instead keeps one Python toolchain (one virtual environment, one lint and type-check
-configuration, one CI job) in one place, and lets the frontend be deployed from its own folder
-on Vercel. The plan's folders map across one to one:
+configuration, one CI job) in one place, and lets the frontend be built from its own folder.
+The plan's folders map across one to one:
 
 | Plan | This repository |
 | --- | --- |
@@ -509,7 +514,7 @@ flowchart LR
   pre-visit report, booking in the chat
 - [x] Abuse protection: bot check, rate limits, booking caps, conversations in Postgres
 - [ ] Observability and evaluation suite
-- [x] Web frontend on Vercel
+- [x] Web frontend (Next.js), served from the same server
 - [x] Infrastructure as code (Terraform) and one-command deploys to an Oracle Cloud Always Free VM
 
 ## Data

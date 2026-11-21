@@ -527,7 +527,10 @@ def test_production_requires_service_tokens() -> None:
 
 def test_production_requires_an_email_account() -> None:
     settings = CoordinatorSettings(
-        environment=Environment.PRODUCTION, service_tokens={"web": SecretStr("a" * 32)}
+        environment=Environment.PRODUCTION,
+        service_tokens={"web": SecretStr("a" * 32)},
+        smtp_username=None,  # whatever the developer's own .env holds
+        smtp_password=None,
     )
 
     with pytest.raises(RuntimeError, match="RAGMED_SMTP_PASSWORD"):

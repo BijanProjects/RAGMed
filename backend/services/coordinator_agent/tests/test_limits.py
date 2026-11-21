@@ -7,6 +7,7 @@ import pytest
 from coordinator_agent.app import CoordinatorSettings, create_coordinator_app
 from coordinator_agent.limits import Limits, booking_limit, client_ip, message_limit, wait_text
 from coordinator_agent.testing import FakeDiagnosis, FakeInterviewer, FakeRouter, FakeScheduling
+from coordinator_agent.verification import CODES_PER_CLINIC_PER_DAY, send_limit
 from ragmed_a2a.client import RemoteAgent, Reply
 from ragmed_core.ratelimit import MemoryRateLimiter
 
@@ -88,3 +89,38 @@ async def test_the_agent_refuses_politely_once_the_limit_is_reached() -> None:
     assert first.state == "completed"
     assert second.state == "rejected"
     assert "emergency number" in second.text
+
+
+async def test_the_whole_demo_has_a_daily_message_ceiling() -> None:
+    limiter = MemoryRateLimiter()
+    limits = Limits(messages_per_clinic_per_day=3)
+
+    allowed = [await message_limit(limiter, limits, f"198.51.100.{n}", f"c{n}") for n in range(3)]
+    refused = await message_limit(limiter, limits, "198.51.100.99", "c99")
+
+    assert allowed == [None, None, None]  # three different visitors
+    assert refused is not None
+    assert "limit for today" in refused
+
+
+async def test_a_visitor_over_their_own_limit_does_not_use_the_shared_budget() -> None:
+    limiter = MemoryRateLimiter()
+    limits = Limits(messages_per_ip_per_hour=1, messages_per_clinic_per_day=2)
+
+    await message_limit(limiter, limits, "198.51.100.1", "a")
+    for _ in range(5):
+        await message_limit(limiter, limits, "198.51.100.1", "a")  # refused by the IP limit
+
+    assert await message_limit(limiter, limits, "198.51.100.2", "b") is None
+
+
+async def test_verification_codes_have_a_daily_ceiling_for_the_clinic() -> None:
+    limiter = MemoryRateLimiter()
+
+    results = [
+        await send_limit(limiter, f"198.51.100.{n // 5}", f"person{n}@example.org")
+        for n in range(CODES_PER_CLINIC_PER_DAY + 1)
+    ]
+
+    assert results[:-1] == [None] * CODES_PER_CLINIC_PER_DAY
+    assert results[-1] == "Online booking is closed for today. Please come back tomorrow."

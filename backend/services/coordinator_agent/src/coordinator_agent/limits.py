@@ -15,6 +15,9 @@ class Limits:
     # A full intake (about ten questions, the report, times and a booking) is ~14 messages.
     messages_per_ip_per_hour: int = 40
     messages_per_conversation_per_day: int = 60
+    # A ceiling on the whole demo, whoever sends: the free model quota is shared by everyone, so
+    # a flood from many addresses ends in a friendly message instead of provider errors.
+    messages_per_clinic_per_day: int = 1500
     bookings_per_ip_per_day: int = 3
     bookings_per_clinic_per_day: int = 40  # a ceiling on the whole calendar, whoever books
 
@@ -50,6 +53,13 @@ async def message_limit(
                 f"available for everyone. Please try again in {wait_text(decision.retry_after)}. "
                 "If this is an emergency, call your local emergency number."
             )
+    # Checked last, so visitors already over their own limit do not use up the shared budget.
+    decision = await limiter.hit("msg:clinic", limits.messages_per_clinic_per_day, DAY)
+    if not decision.allowed:
+        return (
+            "This free demo has reached its limit for today. Please come back tomorrow. "
+            "If this is an emergency, call your local emergency number."
+        )
     return None
 
 

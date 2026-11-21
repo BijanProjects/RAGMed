@@ -1,0 +1,20 @@
+#cloud-config
+# First boot of the RAGMed server: Docker, automatic security updates, and the firewall.
+package_update: true
+package_upgrade: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - unattended-upgrades
+  - rsync
+
+runcmd:
+  - usermod -aG docker ubuntu
+  - systemctl enable --now docker
+  # Oracle's Ubuntu images reject everything but SSH in iptables; open the web ports too.
+  - iptables -I INPUT 5 -p tcp --dport 80 -j ACCEPT
+  - iptables -I INPUT 5 -p tcp --dport 443 -j ACCEPT
+  - iptables -I INPUT 5 -p udp --dport 443 -j ACCEPT
+  - netfilter-persistent save
+  - mkdir -p /opt/ragmed && chown ubuntu:ubuntu /opt/ragmed
+  - touch /var/lib/cloud/ragmed-ready

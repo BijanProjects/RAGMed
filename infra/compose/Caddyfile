@@ -1,0 +1,23 @@
+# The only public site: the web app, with a free Let's Encrypt certificate that Caddy renews by
+# itself. The backend services have no public address; the web app reaches them on the private
+# Docker network. Caddy replaces any X-Forwarded-For header a visitor sends, so the app's rate
+# limits see the real address.
+{$WEB_HOST} {
+	request_body {
+		max_size 64KB
+	}
+
+	reverse_proxy web:3000 {
+		# Chat replies stream while the agents work.
+		flush_interval -1
+	}
+
+	header {
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

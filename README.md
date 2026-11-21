@@ -13,7 +13,8 @@ system offers real appointment slots and books one after the patient confirms.
 > suite. See the [roadmap](#roadmap).
 
 **Contents:** [Try it](#try-it-locally) · [How it fits together](#how-it-fits-together) ·
-[Deployment](#deployment) · [Project structure](#project-structure) ·
+[Deployment](#deployment) · [Security audit](docs/security-audit.md) ·
+[Project structure](#project-structure) ·
 [Embedding benchmark](#embedding-benchmark) ·
 [Roadmap](#roadmap)
 
@@ -106,6 +107,9 @@ Three ideas carry the whole design:
   call a small, fixed set of tools on an MCP server, which limits what an agent can do.
 
 ## Protection against abuse
+
+A full [security audit](docs/security-audit.md) covers the threat model, the live attack tests
+and their results, the findings that were fixed, and the remaining risks.
 
 The clinic is a free public demo that calls paid-for language models and books real calendar
 slots, so every request passes these checks:

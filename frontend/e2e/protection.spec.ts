@@ -45,3 +45,12 @@ test("unknown actions and bad booking emails are refused before the check", asyn
   expect(badEmail.status()).toBe(400);
   expect(badCode.status()).toBe(400);
 });
+
+test("the health check reports a backend outage and nothing else", async ({ request }) => {
+  // In these tests the backend address points nowhere, so the backend counts as down.
+  const response = await request.get("/api/health");
+
+  expect(response.status()).toBe(503);
+  expect(await response.json()).toEqual({ status: "degraded" });
+  expect(response.headers()["cache-control"]).toContain("no-store");
+});

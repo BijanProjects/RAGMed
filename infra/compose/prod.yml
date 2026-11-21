@@ -1,0 +1,159 @@
+# RAGMed on one server: the web app, four backend services, Postgres, Valkey, and Caddy for HTTPS.
+# Only Caddy is reachable from the internet (ports 80 and 443), and it serves only the web app;
+# everything else talks on the private Docker network. Every link between services needs its own token.
+#
+# Run from the repository root on the server (scripts/deploy.sh does this):
+#   docker compose -f infra/compose/prod.yml --env-file .env.production up -d --build
+name: ragmed
+
+x-backend: &backend
+  build: ../../backend
+  image: ragmed-backend
+  restart: unless-stopped
+  # Run as the owner of the data folder (on Oracle's Ubuntu image that is uid 1001, not 1000),
+  # so the services can write their SQLite and index lock files.
+  user: "${APP_UID:-1000}:${APP_GID:-1000}"
+  volumes: ["${DATA_DIR:-../../backend/data}:/app/data"]
+  logging: &logging
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-health: &health
+  interval: 10s
+  timeout: 5s
+  retries: 30
+  start_period: 20s
+
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ragmed
+      POSTGRES_USER: ragmed
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes: [postgres:/var/lib/postgresql/data]
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ragmed -d ragmed"]
+      <<: *health
+
+  valkey:
+    image: valkey/valkey:8.0-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      <<: *health
+
+  mcp-medical:
+    <<: *backend
+    command: ["python", "-m", "mcp_medical", "serve"]
+    environment:
+      RAGMED_SERVICE_NAME: mcp-medical
+      RAGMED_PORT: "9001"
+      RAGMED_SERVICE_TOKENS: '{"diagnosis-agent": "${TOKEN_MEDICAL:?}"}'
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:9001/healthz')"]
+      <<: *health
+
+  mcp-scheduling:
+    <<: *backend
+    command: ["python", "-m", "mcp_scheduling"]
+    environment:
+      RAGMED_SERVICE_NAME: mcp-scheduling
+      RAGMED_PORT: "9002"
+      RAGMED_CALENDAR: calcom
+      CAL_API_KEY: ${CAL_API_KEY:?}
+      RAGMED_SERVICE_TOKENS: '{"coordinator-agent": "${TOKEN_SCHEDULING:?}"}'
+      RAGMED_CLINICIAN_TOKENS: '{"web": "${TOKEN_CLINICIAN:?}"}'
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:9002/healthz')"]
+      <<: *health
+
+  diagnosis-agent:
+    <<: *backend
+    command: ["python", "-m", "diagnosis_agent"]
+    environment:
+      RAGMED_SERVICE_NAME: diagnosis-agent
+      RAGMED_PORT: "8001"
+      RAGMED_PUBLIC_URL: http://diagnosis-agent:8001
+      RAGMED_MCP_URL: http://mcp-medical:9001/mcp
+      RAGMED_MCP_TOKEN: ${TOKEN_MEDICAL:?}
+      RAGMED_SERVICE_TOKENS: '{"coordinator-agent": "${TOKEN_DIAGNOSIS:?}"}'
+      GROQ_API_KEY: ${GROQ_API_KEY:?}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:?}
+    depends_on:
+      mcp-medical: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8001/healthz')"]
+      <<: *health
+
+  coordinator-agent:
+    <<: *backend
+    command: ["python", "-m", "coordinator_agent"]
+    environment:
+      RAGMED_SERVICE_NAME: coordinator-agent
+      RAGMED_PORT: "8000"
+      RAGMED_PUBLIC_URL: http://coordinator-agent:8000
+      RAGMED_DIAGNOSIS_URL: http://diagnosis-agent:8001
+      RAGMED_DIAGNOSIS_TOKEN: ${TOKEN_DIAGNOSIS:?}
+      RAGMED_SCHEDULING_URL: http://mcp-scheduling:9002/mcp
+      RAGMED_SCHEDULING_TOKEN: ${TOKEN_SCHEDULING:?}
+      RAGMED_SERVICE_TOKENS: '{"web": "${TOKEN_WEB:?}"}'
+      RAGMED_DATABASE_URL: postgresql://ragmed:${POSTGRES_PASSWORD:?}@postgres:5432/ragmed
+      RAGMED_VALKEY_URL: redis://valkey:6379/0
+      RAGMED_SMTP_USERNAME: ${RAGMED_SMTP_USERNAME:?}
+      RAGMED_SMTP_PASSWORD: ${RAGMED_SMTP_PASSWORD:?}
+      GROQ_API_KEY: ${GROQ_API_KEY:?}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:?}
+    depends_on:
+      postgres: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      diagnosis-agent: { condition: service_healthy }
+      mcp-scheduling: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz')"]
+      <<: *health
+
+  web:
+    build:
+      context: ../../frontend
+      args:
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:?}
+    image: ragmed-web
+    restart: unless-stopped
+    environment:
+      COORDINATOR_URL: http://coordinator-agent:8000
+      COORDINATOR_TOKEN: ${TOKEN_WEB:?}
+      SCHEDULING_URL: http://mcp-scheduling:9002
+      CLINICIAN_TOKEN: ${TOKEN_CLINICIAN:?}
+      CLINICIAN_ACCESS_CODE: ${CLINICIAN_ACCESS_CODE:?}
+      SESSION_SECRET: ${SESSION_SECRET:?}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:?}
+    logging: *logging
+    depends_on:
+      coordinator-agent: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      <<: *health
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      WEB_HOST: ${WEB_HOST:?}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging: *logging
+    depends_on:
+      web: { condition: service_healthy }
+
+volumes:
+  postgres:
+  caddy-data:
+  caddy-config:

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help demo infra-up infra-down
+.PHONY: help demo infra-up infra-down infra deploy
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -12,3 +12,9 @@ infra-up: ## Start local Postgres and Valkey (Docker)
 
 infra-down: ## Stop local Postgres and Valkey (data is kept)
 	docker compose -f infra/compose/dev.yml down
+
+infra: ## Create or update the Oracle Cloud server (ARGS=plan to preview)
+	./scripts/infra.sh $(ARGS)
+
+deploy: ## Deploy the backend to the server (after make infra)
+	./scripts/deploy.sh

@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from coordinator_agent.limits import Limits, client_ip, message_limit
-from ragmed_a2a.server import report_progress, start_task
+from ragmed_a2a.server import report_draft, report_progress, start_task
 from ragmed_core.clinic import COORDINATOR_AGENT
 from ragmed_core.ratelimit import MemoryRateLimiter, RateLimiter
 from ragmed_llm import AtCapacityError
@@ -81,7 +81,15 @@ class CoordinatorExecutor(AgentExecutor):
             async for event in self._graph.astream(turn, config, stream_mode=["custom", "updates"]):
                 # With several stream modes, each event is a (mode, payload) pair.
                 mode, data = cast(tuple[str, dict[str, Any]], event)
-                if mode == "custom" and "progress" in data:
+                if mode == "custom" and "draft" in data:
+                    await report_draft(
+                        updater,
+                        str(data["draft"]),
+                        agent=str(data.get("agent") or COORDINATOR_AGENT),
+                        label=str(data.get("label") or ""),
+                        reset=bool(data.get("reset")),
+                    )
+                elif mode == "custom" and "progress" in data:
                     agent = str(data.get("agent") or COORDINATOR_AGENT)
                     await report_progress(updater, data["progress"], agent)
                 elif mode == "updates":

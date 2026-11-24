@@ -52,6 +52,8 @@ interface Message {
   text: string;
   data?: ReplyData | null;
   progress: Step[]; // what each agent did while this reply was prepared
+  draft?: string; // the reply as it is being written, until the final one arrives
+  draftLabel?: string; // e.g. "Draft · checking against sources"
   pending: boolean;
   failed?: boolean;
 }
@@ -160,7 +162,13 @@ export function Chat() {
       }
       if (CHECK_ENABLED) setVerified(true); // the server set a session cookie
       for await (const event of readEvents(response)) {
-        if (event.type === "progress") {
+        if (event.type === "draft") {
+          update(replyId, (m) => ({
+            ...m,
+            draft: (event.reset ? "" : (m.draft ?? "")) + event.text,
+            draftLabel: event.label ?? m.draftLabel,
+          }));
+        } else if (event.type === "progress") {
           const step = { agent: event.agent ?? COORDINATOR, text: event.text };
           update(replyId, (m) => ({ ...m, progress: [...m.progress, step] }));
         } else if (event.type === "reply") {
@@ -169,6 +177,7 @@ export function Chat() {
             ...m,
             text: event.text,
             data: event.data,
+            draft: undefined,
             pending: false,
             failed: event.state !== "completed",
           }));
@@ -358,13 +367,27 @@ function Bubble({
       >
         {message.pending &&
           (message.progress.length > 0 ? (
-            <StepList steps={message.progress} live />
+            <StepList steps={message.progress} live={!message.draft} />
           ) : (
             <p className="flex items-center gap-2 text-sm text-neutral-500">
               <span className="size-2 animate-pulse rounded-full bg-sky-500" />
               Thinking…
             </p>
           ))}
+        {message.pending && message.draft && (
+          <div className="space-y-1.5" data-draft>
+            {message.draftLabel && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+                <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+                {message.draftLabel}
+              </span>
+            )}
+            <div className={`prose-chat text-[15px] leading-relaxed ${message.draftLabel ? "text-neutral-600 dark:text-neutral-400" : ""}`}>
+              <ReactMarkdown>{message.draft}</ReactMarkdown>
+              <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-sky-500 align-middle" aria-hidden />
+            </div>
+          </div>
+        )}
         {showBadge && (
           <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${urgency.style}`}>
             {urgency.label}

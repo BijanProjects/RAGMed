@@ -1,5 +1,6 @@
 """Fakes for tests: a knowledge base and a reasoner that need no network or model."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from diagnosis_agent.schema import (
@@ -71,9 +72,18 @@ class FakeReasoner:
         self.previous_queries.append(previous)
         return SearchQuery(query=f"query {len(self.previous_queries)}", condition=self.condition)
 
-    async def answer(self, instructions: str) -> DiagnosisAnswer:
+    async def answer(
+        self,
+        question: str,
+        instructions: str,
+        write: Callable[[str], None] | None = None,
+    ) -> DiagnosisAnswer:
         self.calls.append("answer")
-        return self.answer_given.model_copy(update={"answerable": self.answerable.pop(0)})
+        answerable = self.answerable.pop(0)
+        if write and answerable:
+            for word in self.answer_given.answer.split(" "):
+                write(word + " ")
+        return self.answer_given.model_copy(update={"answerable": answerable})
 
     async def check(self, answer: str, passages: str) -> GroundingCheck:
         self.calls.append("check")

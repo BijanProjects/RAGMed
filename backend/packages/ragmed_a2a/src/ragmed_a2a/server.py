@@ -169,3 +169,14 @@ async def report_progress(updater: TaskUpdater, text: str, agent: str = "") -> N
     if agent:
         parts.append(new_data_part({"agent": agent}))
     await updater.update_status(TaskState.TASK_STATE_WORKING, updater.new_agent_message(parts))
+
+
+async def report_draft(
+    updater: TaskUpdater, text: str, *, agent: str = "", label: str = "", reset: bool = False
+) -> None:
+    """A piece of a reply still being written, sent as a "working" status update with only a
+    data part {"draft": ..., "reset": ...}. `reset` starts the draft again; `label` says what
+    the draft is (for example that it is not yet checked against its sources)."""
+    data = {"draft": text, "reset": reset, "agent": agent, "label": label}
+    message = updater.new_agent_message([new_data_part(data)])
+    await updater.update_status(TaskState.TASK_STATE_WORKING, message)

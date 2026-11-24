@@ -362,3 +362,27 @@ test("a source with a known page links straight to it", async ({ page }) => {
   const link = page.getByRole("link", { name: "Read the full page on medlineplus.gov ↗" });
   await expect(link).toHaveAttribute("href", "https://medlineplus.gov/asthma.html");
 });
+
+test("a reply streams in as a labelled draft, then the checked answer replaces it", async ({ page }) => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/chat", async (route) => {
+    await gate;
+    const events = [
+      { type: "draft", text: "", reset: true, label: "Draft · checking against sources" },
+      { type: "draft", text: "Asthma is caused by ", label: "Draft · checking against sources" },
+      { type: "draft", text: "inflamed airways. ", label: "Draft · checking against sources" },
+      reply("answer", "Asthma is caused by inflamed airways [1]."),
+    ];
+    await route.fulfill({ status: 200, contentType: "application/x-ndjson",
+      body: events.map((e) => JSON.stringify(e)).join("\n") + "\n" });
+  });
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("What causes asthma?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  release();
+
+  await expect(page.getByText("Asthma is caused by inflamed airways [1].")).toBeVisible();
+  await expect(page.locator("[data-draft]")).toHaveCount(0); // the draft is gone once checked
+});

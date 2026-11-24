@@ -6,7 +6,7 @@ still under way (consult.py).
 """
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from a2a.helpers import get_data_parts, new_data_part, new_text_part
@@ -17,7 +17,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ValidationError
 
 from diagnosis_agent.consult import ConsultRequest
-from ragmed_a2a.server import report_progress, start_task
+from ragmed_a2a.server import report_draft, report_progress, start_task
 from ragmed_core.clinic import DIAGNOSIS_AGENT, KNOWLEDGE_BASE
 from ragmed_llm import AtCapacityError
 
@@ -27,10 +27,10 @@ log = structlog.get_logger()
 PROGRESS = {
     "rewrite": ("Understanding the question", DIAGNOSIS_AGENT),
     "retrieve": ("Searching the medical knowledge base", KNOWLEDGE_BASE),
-    "generate": ("Reading the sources and writing the answer", DIAGNOSIS_AGENT),
     "check": ("Checking the answer against its sources", DIAGNOSIS_AGENT),
 }
 MAX_QUESTION_CHARS = 4000
+UNCHECKED = "Draft · checking against sources"
 SHOWN_QUERY = 70  # longer search text is cut in progress updates
 AT_CAPACITY = (
     "RAGMed is at capacity right now: it runs on free model quotas that refill every minute. "
@@ -115,8 +115,22 @@ async def _run(
     """Run a graph, reporting each step; on failure, fail the task and return None."""
     result: BaseModel | None = None
     try:
-        async for update in graph.astream(state, stream_mode="updates"):
-            for node, values in update.items():
+        async for event in graph.astream(state, stream_mode=["updates", "custom"]):
+            # With several stream modes, each event is a (mode, payload) pair.
+            mode, payload = cast(tuple[str, dict[str, Any]], event)
+            if mode == "custom":
+                if "progress" in payload:  # a step that reports as it starts
+                    await report_progress(updater, payload["progress"], DIAGNOSIS_AGENT)
+                if "draft" in payload:
+                    await report_draft(
+                        updater,
+                        payload["draft"],
+                        agent=DIAGNOSIS_AGENT,
+                        label=UNCHECKED,
+                        reset=bool(payload.get("reset")),
+                    )
+                continue
+            for node, values in payload.items():
                 said = step(node, values or {})
                 if said:
                     await report_progress(updater, *said)

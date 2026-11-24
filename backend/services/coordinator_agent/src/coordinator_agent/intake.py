@@ -6,14 +6,16 @@ coordinator uses it to choose the one question worth asking next, or to stop.
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from difflib import SequenceMatcher
 from typing import Any, Literal, Protocol
 
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
-from ragmed_llm import ask_structured
+from ragmed_llm import Headed, ask_structured, stream_text
+
+Write = Callable[[str], None]  # receives a reply's text as it is written
 
 MAX_QUESTIONS = 10
 MAX_REPLIES = 4
@@ -192,20 +194,25 @@ Respond to their latest message the way a calm, caring person on an emergency li
   drive yourself, stay with someone or unlock the door, sit up if breathing is hard, keep the
   phone on). Never name a medicine or a dose; at most, "use the rescue medicine your clinician
   prescribed for this, as you were told".
-- Plain words, under 90 words.
-- Set `resume` to true only if they clearly say the symptoms are not happening now, happened
-  in the past, or were a mistake. Then say you will carry on with the questions."""
+- Plain words, under 90 words, no headings or lists.
+
+Write the first line as exactly RESUME if they clearly say the symptoms are not happening now,
+happened in the past, or were a mistake (then say you will carry on with the questions), and
+exactly STAY otherwise. Then your reply, starting on the next line."""
 
 
 FOLLOW_UP = """You are the Care Coordinator at RAGMed Clinic. This patient already has a draft
 pre-visit report (below). Reply to their latest message in context, warmly and briefly:
 
-- If it adds a detail about their problem, thank them plainly, say it has been added for the
-  clinician, and put that detail, short and in their words, in `adds`.
+- If it adds a detail about their problem, acknowledge it plainly and say it has been added for
+  the clinician.
 - If it asks about the report, the visit or what to do next, answer from the report: you
   cannot diagnose; point to the suggested visit and its urgency; if anything sounds worse or
   urgent, tell them to call their local emergency number or go to an emergency department.
-- Under 70 words. Never name a medicine or a dose."""
+- Under 70 words, no headings or lists. Never name a medicine or a dose.
+
+Write the first line as "ADD: " followed by the new detail, short and in their words, or
+"ADD: none" if it adds nothing. Then your reply, starting on the next line."""
 
 
 class FollowUp(BaseModel):
@@ -225,9 +232,13 @@ class Interviewer(Protocol):
 
     async def handoff(self, case: Mapping[str, str], briefing: str, assessment: str) -> Handoff: ...
 
-    async def support(self, category: str, transcript: str) -> Support: ...
+    async def support(self, category: str, transcript: str, write: Write | None = None) -> Support:
+        """Streams the reply's text to `write` as it is written."""
+        ...
 
-    async def follow_up(self, report: str, transcript: str) -> FollowUp: ...
+    async def follow_up(
+        self, report: str, transcript: str, write: Write | None = None
+    ) -> FollowUp: ...
 
 
 class LlmInterviewer:
@@ -257,13 +268,28 @@ class LlmInterviewer:
         )
         return await ask_structured(self._models, Handoff, HANDOFF, user)
 
-    async def follow_up(self, report: str, transcript: str) -> FollowUp:
+    async def follow_up(self, report: str, transcript: str, write: Write | None = None) -> FollowUp:
         user = f"Report:\n{report}\n\nConversation:\n{transcript}"
-        return await ask_structured(self._models, FollowUp, FOLLOW_UP, user)
+        header, reply = await self._headed(FOLLOW_UP, user, write)
+        if not header.upper().startswith("ADD:"):
+            return FollowUp(reply=f"{header} {reply}".strip(), adds="")
+        adds = header[len("ADD:") :].strip()
+        return FollowUp(reply=reply, adds="" if adds.casefold().strip(" .") == "none" else adds)
 
-    async def support(self, category: str, transcript: str) -> Support:
+    async def support(self, category: str, transcript: str, write: Write | None = None) -> Support:
         system = SUPPORT.format(category=category.replace("_", " "))
-        return await ask_structured(self._models, Support, system, f"Conversation:\n{transcript}")
+        header, reply = await self._headed(system, f"Conversation:\n{transcript}", write)
+        if header.upper() not in ("RESUME", "STAY"):
+            return Support(reply=f"{header} {reply}".strip(), resume=False)  # stay, to be safe
+        return Support(reply=reply, resume=header.upper() == "RESUME")
+
+    async def _headed(self, system: str, user: str, write: Write | None) -> tuple[str, str]:
+        """Stream a reply whose first line is a header: the header, then the streamed body."""
+        headed = Headed(write or (lambda _: None))
+        async for piece in stream_text(self._models, system, user):
+            headed.feed(piece)
+        headed.close()
+        return headed.header or "", headed.body.strip()
 
 
 NO_PICTURE = "Working picture: none yet (the knowledge base has not been searched)."

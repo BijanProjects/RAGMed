@@ -1,12 +1,19 @@
 """The four language-model steps of the Diagnosis agent, each with a typed result."""
 
-from collections.abc import Sequence
+import re
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from langchain_core.language_models import BaseChatModel
 
-from diagnosis_agent.schema import ConsultDraft, DiagnosisAnswer, GroundingCheck, SearchQuery
-from ragmed_llm import ask_structured
+from diagnosis_agent.schema import (
+    ConsultDraft,
+    DiagnosisAnswer,
+    GroundingCheck,
+    SearchQuery,
+    Triage,
+)
+from ragmed_llm import ask_structured, stream_text
 
 REWRITE = """Turn the patient's message into one self-contained search query for a medical
 knowledge base of consumer health questions and answers (MedQuAD). If the symptoms point to a
@@ -34,10 +41,45 @@ working picture, using only what the passages say:
 This guides the questions; it is never shown to the patient as a diagnosis."""
 
 
+NOT_ENOUGH = "NOT_ENOUGH"
+WRITE_ANSWER = f"""Answer as plain text for the person, following the instructions you are given,
+with one change: do not add a disclaimer at the end; the clinic adds its own. Cite every claim
+with the number of its passage in square brackets, like [2] or [1, 3], right after the claim:
+an answer without citations is thrown away. Be strict about
+the evidence: if the passages do not contain enough to answer (passages about a different
+condition, or only loosely related, are not enough), reply with exactly {NOT_ENOUGH} and nothing
+else."""
+
+TRIAGE = """Read a medical question and the answer written for it from the clinic's sources,
+and say what it means for the person: possible conditions, urgency, whether to see a clinician,
+who, and for how long. If the answer is NOT_ENOUGH, judge from the question alone."""
+
+# How a model says the passages are not enough: the agreed word, or the source prompt's wording.
+REFUSALS = (NOT_ENOUGH, "I do not have enough information")
+
+
+def might_refuse(text: str) -> bool:
+    """True while `text` is, or could still become, a refusal: such a draft is never shown."""
+    start = text.lstrip()
+    return any(start.startswith(r) or r.startswith(start) for r in REFUSALS)
+
+
+_CITATION = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+Write = Callable[[str], None]
+
+
+def citations_in(answer: str) -> list[int]:
+    """The passage numbers an answer cites, as [2] or [1, 3]."""
+    numbers = {int(n) for group in _CITATION.findall(answer) for n in group.split(",")}
+    return sorted(numbers)
+
+
 class Reasoner(Protocol):
     async def search_query(self, question: str, previous: str | None) -> SearchQuery: ...
 
-    async def answer(self, instructions: str) -> DiagnosisAnswer: ...
+    async def answer(
+        self, question: str, instructions: str, write: Write | None = None
+    ) -> DiagnosisAnswer: ...
 
     async def check(self, answer: str, passages: str) -> GroundingCheck: ...
 
@@ -71,9 +113,32 @@ class LlmReasoner:
             user += f"\n\nThis query did not find enough: {previous}"
         return await ask_structured(self._small, SearchQuery, REWRITE, user)
 
-    async def answer(self, instructions: str) -> DiagnosisAnswer:
-        system = "Return the answer in the requested structure."
-        return await ask_structured(self._large, DiagnosisAnswer, system, instructions)
+    async def answer(
+        self, question: str, instructions: str, write: Write | None = None
+    ) -> DiagnosisAnswer:
+        """Write the answer as streamed plain text (pieces go to `write` as they arrive), then
+        read its triage from the finished text with the small model, without the passages."""
+        text, held = "", ""
+        async for piece in stream_text(self._large, WRITE_ANSWER, instructions):
+            text += piece
+            if write is None or might_refuse(text):
+                held += piece  # might still become NOT_ENOUGH: show nothing yet
+                continue
+            write(held + piece)
+            held = ""
+        answer = text.strip()
+        enough = not might_refuse(answer)
+        if write and held and enough:
+            write(held)
+        user = f"Question:\n{question}\n\nAnswer:\n{answer}"
+        triage = await ask_structured(self._small, Triage, TRIAGE, user)
+        cited = citations_in(answer) if enough else []
+        return DiagnosisAnswer(
+            answerable=enough and bool(cited),
+            answer=answer if enough else "",
+            citations=cited,
+            **triage.model_dump(),
+        )
 
     async def check(self, answer: str, passages: str) -> GroundingCheck:
         user = f"Passages:\n{passages}\n\nAnswer to check:\n{answer}"

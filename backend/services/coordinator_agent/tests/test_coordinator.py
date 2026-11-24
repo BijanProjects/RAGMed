@@ -21,7 +21,7 @@ from coordinator_agent.testing import (
     FakeRouter,
     FakeScheduling,
 )
-from ragmed_a2a.client import Progress, RemoteAgent, Reply
+from ragmed_a2a.client import Draft, Progress, RemoteAgent, Reply
 from ragmed_core.clinic import DRAFT_NOTICE
 from ragmed_core.settings import Environment
 from ragmed_llm import AtCapacityError
@@ -69,6 +69,7 @@ class Chat:
         self.context_id = reply.context_id
         self.progress = [e.text for e in events if isinstance(e, Progress)]
         self.steps = [(e.agent, e.text) for e in events if isinstance(e, Progress)]
+        self.drafts = [e for e in events if isinstance(e, Draft)]
         return reply
 
     async def interview_to_report(self) -> Reply:
@@ -149,6 +150,28 @@ async def test_a_follow_up_with_no_report_starts_an_intake() -> None:
     reply = await chat.send("about 3 weeks")
 
     assert data(reply)["kind"] == "question"
+
+
+async def test_a_cited_answer_streams_as_a_labelled_draft() -> None:
+    chat = Chat(router=FakeRouter(intent="medical_question"))
+
+    await chat.send("What causes migraines?")
+
+    assert chat.drafts[0].reset is True
+    assert chat.drafts[1].text == "Recurring headaches "
+    assert chat.drafts[1].label == "Draft · checking against sources"
+
+
+async def test_the_coordinators_own_reply_streams_as_it_is_written() -> None:
+    chat = Chat()
+    await chat.send("I keep getting headaches")
+    await chat.send("now my face is drooping")
+
+    await chat.send("doctors are not available what should i do?")
+
+    assert "".join(d.text for d in chat.drafts) == (
+        "Emergency departments need no appointment. Call now."
+    )
 
 
 async def test_after_an_emergency_the_coordinator_stays_and_answers() -> None:

@@ -9,8 +9,10 @@ The answer step also judges the evidence (`answerable`), to stay within Groq's f
 """
 
 import re
+from collections.abc import Callable
 from typing import Any, TypedDict
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -94,6 +96,33 @@ def label(passage: Passage) -> str:
         opening = " ".join(passage.text.split()[:12])
         return f"{question} {opening}…"
     return question
+
+
+class DraftSentences:
+    """Passes a streamed draft on a sentence at a time, never one that mentions a dose.
+
+    The draft is shown while it is written, marked as unchecked; the grounding check runs on
+    the whole answer afterwards. Doses are removed whatever the check says, so they are held
+    back here too.
+    """
+
+    def __init__(self, emit: Callable[[str], None]) -> None:
+        self._emit = emit
+        self._buffer = ""
+
+    def feed(self, text: str) -> None:
+        self._buffer += text
+        *done, self._buffer = _SENTENCE.split(self._buffer)
+        for sentence in done:
+            self._send(sentence)
+
+    def flush(self) -> None:
+        self._send(self._buffer)
+        self._buffer = ""
+
+    def _send(self, sentence: str) -> None:
+        if sentence.strip() and not _DOSE.search(sentence):
+            self._emit(sentence.strip() + " ")
 
 
 def remove_doses(text: str) -> str:
@@ -181,7 +210,13 @@ def build_graph(knowledge: Knowledge, reasoner: Reasoner) -> CompiledStateGraph[
         instructions = await knowledge.answer_instructions(
             state["question"], number_passages(state["passages"])
         )
-        return {"draft": await reasoner.answer(instructions)}
+        writer = get_stream_writer()
+        writer({"progress": "Reading the sources and writing the answer"})
+        writer({"draft": "", "reset": True})  # a second search starts a new draft
+        sentences = DraftSentences(lambda sentence: writer({"draft": sentence}))
+        draft = await reasoner.answer(state["question"], instructions, sentences.feed)
+        sentences.flush()
+        return {"draft": draft}
 
     def after_generate(state: State) -> str:
         draft = state["draft"]

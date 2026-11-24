@@ -108,6 +108,8 @@ export interface Step {
 /** What /api/chat streams to the browser, one JSON object per event. */
 export type ChatEvent =
   | { type: "progress"; text: string; agent?: string }
+  /** A piece of the reply while it is written; `reset` starts it again. */
+  | { type: "draft"; text: string; label?: string; reset?: boolean }
   | { type: "reply"; text: string; data: ReplyData | null; contextId: string; state: string }
   | { type: "error"; text: string };
 

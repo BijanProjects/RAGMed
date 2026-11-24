@@ -35,6 +35,31 @@ class SearchQuery(BaseModel):
     )
 
 
+class Triage(BaseModel):
+    """What the answer means for the person: read from the finished answer, not the passages."""
+
+    possible_conditions: list[str] = Field(
+        description="Conditions the answer connects to the symptoms; empty if none."
+    )
+    urgency: Urgency = Field(
+        description="self_care, routine (see a doctor in days or weeks), urgent (today), "
+        "or emergency (call emergency services now). Judge from the question too, even when "
+        "the answer could not help."
+    )
+    recommend_visit: bool = Field(description="True if the person should see a clinician.")
+    clinician_type: ClinicianType = Field(
+        description="Who should see them at RAGMed Clinic. Prefer 'General physician' for "
+        "common or unclear problems, prescriptions, renewals and notes; choose a specialty only "
+        "when the problem clearly belongs to one (e.g. Neurology for recurring migraines with "
+        "aura, Pediatrics for a young child)."
+    )
+    visit_minutes: VisitMinutes = Field(
+        description="15 for a straightforward problem, a note or a prescription; 30 for a "
+        "complex, severe, long-standing or multi-symptom problem."
+    )
+    visit_reason: str = Field(description="One sentence: why this clinician and visit length.")
+
+
 class DiagnosisAnswer(BaseModel):
     answerable: bool = Field(
         description="True only if the passages contain enough to answer the question. Be "

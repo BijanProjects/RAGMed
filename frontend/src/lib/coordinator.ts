@@ -28,6 +28,21 @@ function textOf(parts: Part[] | undefined): string {
   return (parts ?? []).map((p) => p.text ?? "").join("").trim();
 }
 
+/** A piece of a reply being written, from a status message's data part ({"draft": "..."}). */
+function draftOf(parts: Part[] | undefined): { text: string; label?: string; reset?: boolean } | undefined {
+  for (const part of parts ?? []) {
+    const data = part.data as { draft?: unknown; label?: unknown; reset?: unknown } | undefined;
+    if (typeof data?.draft === "string") {
+      return {
+        text: data.draft,
+        label: typeof data.label === "string" && data.label ? data.label : undefined,
+        reset: data.reset === true,
+      };
+    }
+  }
+  return undefined;
+}
+
 /** Who is acting, from a status message's data part ({"agent": "..."}), if it says. */
 function agentOf(parts: Part[] | undefined): string | undefined {
   for (const part of parts ?? []) {
@@ -142,6 +157,9 @@ export async function* askCoordinator(
         if (messageText && !text) text = messageText;
       } else if (messageText) {
         yield { type: "progress", text: messageText, agent: agentOf(statusMessage?.parts) };
+      } else {
+        const draft = draftOf(statusMessage?.parts);
+        if (draft) yield { type: "draft", ...draft };
       }
     }
   }

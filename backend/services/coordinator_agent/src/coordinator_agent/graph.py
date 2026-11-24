@@ -77,7 +77,7 @@ from coordinator_agent.verification import (
     public_view,
     send_limit,
 )
-from ragmed_a2a.client import AgentEvent, Progress
+from ragmed_a2a.client import AgentEvent, Draft, Progress
 from ragmed_a2a.client import Reply as AgentReply
 from ragmed_core.clinic import (
     CLINICIAN_TYPES,
@@ -142,6 +142,11 @@ def history_text(turns: list[Turn], limit: int = HISTORY_TURNS) -> str:
     return "\n".join(f"{t['role']}: {t['text'][:HISTORY_CHARS]}" for t in turns[-limit:])
 
 
+def draft(text: str) -> None:
+    """Stream a piece of the Coordinator's own reply to the web app as it is written."""
+    get_stream_writer()({"draft": text})
+
+
 def step(text: str, agent: str = COORDINATOR_AGENT) -> None:
     """Report what one member of the care team is doing (streamed to the web app)."""
     get_stream_writer()({"progress": text, "agent": agent})
@@ -151,9 +156,12 @@ async def _ask_diagnosis(
     diagnosis: Diagnosis, text: str, data: dict[str, Any] | None = None
 ) -> AgentReply | None:
     final: AgentReply | None = None
+    write = get_stream_writer()
     async for event in diagnosis.stream(text, data=data):
         if isinstance(event, Progress):
             step(event.text, event.agent or DIAGNOSIS_AGENT)
+        elif isinstance(event, Draft):
+            write({"draft": event.text, "reset": event.reset, "label": event.label})
         else:
             final = event
     return final
@@ -207,7 +215,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             *state.get("history", []),
             {"role": "patient", "text": state["message"]},
         ]
-        answer = await interviewer.support(alert["category"], history_text(turns, 8))
+        answer = await interviewer.support(alert["category"], history_text(turns, 8), draft)
         if answer.resume:
             phase = alert["before"] if alert["before"] in ("intake", "chat", "report") else "chat"
             asked = state.get("asked", [])
@@ -261,7 +269,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
                 else "Not booked yet: the patient can book it with the buttons under your reply."
             )
         )
-        answer = await interviewer.follow_up(summary, history_text(turns, 6))
+        answer = await interviewer.follow_up(summary, history_text(turns, 6), draft)
         update: State = {}
         if answer.adds.strip():
             step("Added to your report for the clinician")

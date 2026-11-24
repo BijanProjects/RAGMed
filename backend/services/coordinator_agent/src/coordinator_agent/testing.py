@@ -1,13 +1,13 @@
 """Fakes for tests: router, interviewer, Diagnosis agent and scheduling, with no network."""
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from coordinator_agent.intake import CaseUpdate, FollowUp, Handoff, IntakeTurn, Support
 from coordinator_agent.router import Intent, Route
 from coordinator_agent.scheduling import SchedulingError
-from ragmed_a2a.client import AgentEvent, Progress, Reply
+from ragmed_a2a.client import AgentEvent, Draft, Progress, Reply
 
 ANSWER: dict[str, Any] = {
     "answer": "Recurring one-sided headaches can be migraines [1].",
@@ -110,18 +110,29 @@ class FakeInterviewer:
             )
         return IntakeTurn(updates=updates, complete=True, next_question="", quick_replies=[])
 
-    async def follow_up(self, report: str, transcript: str) -> FollowUp:
+    async def follow_up(
+        self, report: str, transcript: str, write: Callable[[str], None] | None = None
+    ) -> FollowUp:
         latest = transcript.splitlines()[-1].removeprefix("patient: ")
         if latest.endswith("?"):
-            return FollowUp(reply="Your report suggests a visit soon.", adds="")
-        return FollowUp(reply="Thanks, I've added that for your clinician.", adds=latest)
+            answer = FollowUp(reply="Your report suggests a visit soon.", adds="")
+        else:
+            answer = FollowUp(reply="Thanks, I've added that for your clinician.", adds=latest)
+        if write:
+            write(answer.reply)
+        return answer
 
-    async def support(self, category: str, transcript: str) -> Support:
+    async def support(
+        self, category: str, transcript: str, write: Callable[[str], None] | None = None
+    ) -> Support:
         """Resumes when the patient says it is not happening; otherwise stays with them."""
         self.supported.append((category, transcript))
         latest = transcript.splitlines()[-1].casefold()
         if "not happening" in latest or "passed" in latest:
             return Support(reply="Good, I'm glad it has passed.", resume=True)
+        if write:
+            for word in ("Emergency departments need no appointment.", " Call now."):
+                write(word)
         return Support(reply="Emergency departments need no appointment. Call now.", resume=False)
 
     async def handoff(self, case: Mapping[str, str], briefing: str, assessment: str) -> Handoff:
@@ -158,6 +169,8 @@ class FakeDiagnosis:
             return
         self.questions.append(text)
         yield Progress("Searching the medical knowledge base")
+        yield Draft("", reset=True, label="Draft · checking against sources")
+        yield Draft("Recurring headaches ", label="Draft · checking against sources")
         found = [self.result] if self.state == "completed" else []
         yield Reply(self.state, self.text or str(self.result.get("answer", "")), found)
 

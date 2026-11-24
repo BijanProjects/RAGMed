@@ -39,6 +39,15 @@ class Progress:
 
 
 @dataclass(frozen=True, slots=True)
+class Draft:
+    """A piece of a reply while it is written (see `server.report_draft`)."""
+
+    text: str
+    reset: bool = False
+    label: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Reply:
     """The other agent's result: its text, any structured data, and how the task ended."""
 
@@ -49,7 +58,7 @@ class Reply:
     task_id: str = ""
 
 
-AgentEvent = Progress | Reply
+AgentEvent = Progress | Draft | Reply
 
 
 async def _add_traceparent(request: httpx.Request) -> None:
@@ -100,6 +109,8 @@ class RemoteAgent:
             task_id = update.get("task_id") or task_id
             if "progress" in update:
                 yield Progress(update["progress"], update.get("agent", ""))
+            if "draft" in update:
+                yield Draft(**update["draft"])
             reply_text.extend(update.get("text", []))
             reply_data.extend(update.get("data", []))
             state = update.get("state", state)
@@ -128,11 +139,20 @@ def _read(event: StreamResponse) -> dict[str, Any]:
             update["state"] = _FINAL_STATES[status.state]
             if message_text:
                 update["text"] = [message_text]
-        elif message_text:
-            update["progress"] = message_text
+        else:
             for data in get_data_parts(status.message.parts):
-                if isinstance(data, dict) and isinstance(data.get("agent"), str):
+                if not isinstance(data, dict):
+                    continue
+                if isinstance(data.get("draft"), str):
+                    update["draft"] = {
+                        "text": data["draft"],
+                        "reset": bool(data.get("reset")),
+                        "label": str(data.get("label") or ""),
+                    }
+                elif message_text and isinstance(data.get("agent"), str):
                     update["agent"] = data["agent"]
+            if message_text:
+                update["progress"] = message_text
         return update
     if kind == "message":
         return {"text": get_text_parts(event.message.parts), "state": "completed"}

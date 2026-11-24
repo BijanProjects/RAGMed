@@ -7,7 +7,7 @@ from diagnosis_agent.app import DiagnosisSettings, create_diagnosis_app
 from diagnosis_agent.executor import AT_CAPACITY
 from diagnosis_agent.schema import SearchQuery
 from diagnosis_agent.testing import PASSAGES, FakeKnowledge, FakeReasoner
-from ragmed_a2a.client import Progress, RemoteAgent, Reply
+from ragmed_a2a.client import AgentEvent, Progress, RemoteAgent, Reply
 from ragmed_core.settings import Environment
 from ragmed_llm import AtCapacityError
 
@@ -20,9 +20,7 @@ def settings(**overrides: object) -> DiagnosisSettings:
     return DiagnosisSettings(public_url=BASE, **overrides)  # type: ignore[arg-type]
 
 
-async def ask(
-    text: str, reasoner: FakeReasoner, knowledge: FakeKnowledge
-) -> list[Progress | Reply]:
+async def ask(text: str, reasoner: FakeReasoner, knowledge: FakeKnowledge) -> list[AgentEvent]:
     app = create_diagnosis_app(settings(), knowledge=knowledge, reasoner=reasoner)
     agent = RemoteAgent(BASE, transport=httpx.ASGITransport(app=app))
     try:
@@ -52,7 +50,7 @@ async def test_answers_over_a2a_with_progress_and_structured_data() -> None:
 
 async def consult(
     request: dict[str, Any], reasoner: FakeReasoner, knowledge: FakeKnowledge
-) -> list[Progress | Reply]:
+) -> list[AgentEvent]:
     app = create_diagnosis_app(settings(), knowledge=knowledge, reasoner=reasoner)
     agent = RemoteAgent(BASE, transport=httpx.ASGITransport(app=app))
     try:

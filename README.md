@@ -95,6 +95,39 @@ flowchart LR
     class sched planned
 ```
 
+### How the care team works together during an intake
+
+The patient talks to the **Care Coordinator**, which plays the role of the triage desk: it
+decides what to ask, when it has enough, how urgent the case is, and what to tell the clinician.
+It does not work from a checklist. On every turn it first asks the **Diagnosis agent** for a
+*consult*: a quick, grounded working picture from the knowledge base.
+
+```mermaid
+sequenceDiagram
+    participant P as Patient
+    participant C as Care Coordinator
+    participant D as Diagnosis agent
+    participant K as Knowledge base (MCP)
+    P->>C: "Headaches on one side for a month"
+    C->>D: consult (case so far, previous leads)
+    D->>K: search by case and by lead names
+    K-->>D: passages
+    D-->>C: leads with sources, what would tell them apart, warning signs, working urgency
+    C->>P: one question that changes the picture (or several choices to tick)
+    Note over C,D: repeat until more questions would not change the plan
+    C->>D: full assessment (cited, checked)
+    C->>P: report + handoff note + urgency score 1-5 + visit to book
+```
+
+- The consult costs one small-model call on shortened passages, to fit Groq's free tier. Every
+  lead must cite a passage, or it is dropped.
+- The handoff gives the clinician an impression, a 1-5 urgency score and what is still to check.
+  The Coordinator may raise the urgency the evidence supports, never lower it. The score is
+  loosely modelled on five-level triage scales and is not validated.
+- The chat shows which agent is doing what, live, and each citation opens the passage it came
+  from. This copy of MedQuAD does not keep the original page addresses, so the outside link
+  searches MedlinePlus for the topic.
+
 Three ideas carry the whole design:
 
 - **RAG** (retrieval-augmented generation): before answering, the system *retrieves* the passages
@@ -514,8 +547,8 @@ flowchart LR
   Weaviate and Pinecone next)*
 - [x] Medical Knowledge MCP server
 - [x] Scheduling MCP server (Cal.com, with a built-in test calendar for development)
-- [x] Diagnosis and Care Coordinator agents over A2A (Groq models): adaptive intake, draft
-  pre-visit report, booking in the chat
+- [x] Diagnosis and Care Coordinator agents over A2A (Groq models): knowledge-guided intake,
+  handoff note with an urgency score, draft pre-visit report, booking in the chat
 - [x] Abuse protection: bot check, rate limits, booking caps, conversations in Postgres
 - [ ] Observability and evaluation suite
 - [x] Web frontend (Next.js), served from the same server

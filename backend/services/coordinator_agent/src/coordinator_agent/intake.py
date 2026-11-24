@@ -26,6 +26,10 @@ FINAL_QUESTION = (
 )
 
 WARNING_CHECK = "Before we go on, have you had any of these?"
+WARNING_AGAIN = (
+    "Just to be sure: have you had any of these, now or recently? Tick any that apply, or "
+    "“None of these”."
+)
 
 CaseField = Literal[
     "main_problem",
@@ -120,7 +124,8 @@ would not change who should see them or how soon. That is often 3 to 6 questions
 request may need 1 or 2. Then leave `next_question` and `reason` empty.
 
 Record every fact from the person's latest answer in `updates` (one field each, short, in their
-words), including what they say they do NOT have, under `negatives`. Offer up to 4 short
+words), including what they say they do NOT have, under `negatives`. Record only what the
+person said; never copy symptoms from the working picture. Offer up to 4 short
 `quick_replies` when natural (for example "Yes", "No", "Less than a day").
 
 When several answers could apply at once (other symptoms, medicines, existing conditions,
@@ -359,9 +364,39 @@ def is_none(answer: str) -> bool:
     )
 
 
+_AFFIRMATIVE = {"yes", "yeah", "yep", "y", "all", "both", "all of them", "yes all", "yes, all"}
+_STOPWORDS = {
+    "about", "after", "being", "every", "from", "have", "into", "more", "other", "than",
+    "that", "their", "there", "these", "very", "when", "which", "with", "your",
+}  # fmt: skip
+
+
+def classify_checklist(answer: str, offered: Sequence[str]) -> tuple[str, list[str]]:
+    """How an answer to the warning-sign checklist reads: ("none" | "named" | "yes" |
+    "unclear", the signs named). A sign counts as named when the answer shares one of its
+    distinctive words ("short of breath" names "Shortness of breath")."""
+    if is_none(answer):
+        return "none", []
+    said = {w.strip(".,;!?") for w in answer.casefold().split()}
+    named = [
+        sign
+        for sign in offered
+        if any(
+            len(w) >= 4 and w not in _STOPWORDS and any(s.startswith(w[:5]) for s in said)  # noqa: PLR2004
+            for w in (word.strip(".,;()") for word in sign.casefold().split())
+        )
+    ]
+    if named:
+        return "named", named
+    bare = answer.casefold().strip(" .!")
+    if bare in _AFFIRMATIVE or (bare.startswith("yes") and len(bare.split()) <= 3):  # noqa: PLR2004
+        return "yes", []
+    return "unclear", []
+
+
 def natural(acknowledgement: str) -> str:
     """Drop stock phrases a small model adds despite being told not to ("Thank you for sharing")."""
-    text = _STOCK.sub(".", acknowledgement).strip(" ,;")
+    text = _STOCK.sub(".", acknowledgement).strip(" ,;").lstrip(". ")
     text = re.sub(r"\.{2,}", ".", text).strip()
     return text if sum(c.isalpha() for c in text) >= 3 else ""  # noqa: PLR2004
 

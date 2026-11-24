@@ -3,6 +3,7 @@ from coordinator_agent.intake import (
     CaseUpdate,
     briefing,
     case_lines,
+    classify_checklist,
     is_repeat,
     is_straightforward_request,
     merge,
@@ -122,3 +123,15 @@ def test_the_checklist_answer_is_recorded_by_rule() -> None:
     assert record_signs({"negatives": "no fever"}, "None of these", offered) == {
         "negatives": "no fever; none of: Blue lips, Cannot finish a sentence"
     }
+
+
+def test_checklist_answers_are_read_carefully() -> None:
+    offered = ["Coughing up blood", "Shortness of breath", "Chest pain"]
+
+    assert classify_checklist("None of these", offered) == ("none", [])
+    assert classify_checklist("I get short of breath on stairs", offered) == (
+        "named",
+        ["Shortness of breath"],
+    )
+    assert classify_checklist("Yes", offered) == ("yes", [])
+    assert classify_checklist("Yes, I hear wheezing sometimes", offered) == ("unclear", [])

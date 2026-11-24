@@ -170,7 +170,15 @@ def build_report(
     """The draft pre-visit report the physician receives with the booking."""
     sources = _sources(data)
     handoff = handoff or {}
-    score, urgency = triage(str(data.get("urgency", "routine")), handoff.get("urgency_score"))
+    proposed = handoff.get("urgency_score")
+    score, urgency = triage(str(data.get("urgency", "routine")), proposed)
+    score_reason = str(handoff.get("score_reason", "")).strip()
+    if proposed in SCORE_TEXT and score != proposed:  # the reason was written for another score
+        score_reason = (
+            "Raised because a warning sign was reported."
+            if handoff.get("warning_signs")
+            else "Raised to match the urgency the medical sources support."
+        )
     clinician = str(data.get("clinician_type") or GENERAL_PHYSICIAN)
     minutes = int(data.get("visit_minutes") or 30)
     reason = str(data.get("visit_reason", ""))
@@ -187,7 +195,7 @@ def build_report(
         "impression": str(handoff.get("impression", "")).strip(),
         "open_questions": [str(q) for q in handoff.get("open_questions", []) if str(q).strip()][:3],
         "urgency_score": score,
-        "score_reason": str(handoff.get("score_reason", "")).strip(),
+        "score_reason": score_reason,
         "assessment": _without_disclaimer(str(data.get("answer", ""))),
         "possible_conditions": [str(c) for c in data.get("possible_conditions", [])],
         "warning_signs": str(handoff.get("warning_signs", "")),

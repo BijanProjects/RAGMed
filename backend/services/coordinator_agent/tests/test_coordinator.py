@@ -290,6 +290,23 @@ async def test_warning_signs_are_checked_as_a_checklist_after_the_first_answer()
     assert after.text == "How bad is it, from 0 to 10?"  # asked once, then the interview goes on
 
 
+async def test_an_unclear_checklist_answer_is_asked_once_more() -> None:
+    chat = Chat(diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)))
+    await chat.send("I keep getting headaches on one side")
+    await chat.send("About a month")  # then the checklist
+
+    again = await chat.send("Yes, it hurts a lot")
+    second = await chat.send("Not sure, maybe")
+
+    assert again.text.startswith("Just to be sure: have you had any of these")
+    assert data(again)["quick_replies"] == [
+        "Sudden, worst-ever headache",
+        "Fever with a stiff neck",
+    ]
+    assert data(second)["kind"] == "report"  # still unclear: treated as a warning sign, to be safe
+    assert data(second)["urgency"] == "urgent"
+
+
 async def test_an_urgent_picture_checks_warning_signs_at_once() -> None:
     chat = Chat(diagnosis=FakeDiagnosis(consult={**WITH_SIGNS, "urgency": "urgent"}))
 

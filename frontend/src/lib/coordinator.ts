@@ -28,6 +28,15 @@ function textOf(parts: Part[] | undefined): string {
   return (parts ?? []).map((p) => p.text ?? "").join("").trim();
 }
 
+/** Who is acting, from a status message's data part ({"agent": "..."}), if it says. */
+function agentOf(parts: Part[] | undefined): string | undefined {
+  for (const part of parts ?? []) {
+    const agent = (part.data as { agent?: unknown } | undefined)?.agent;
+    if (typeof agent === "string" && agent.length <= 40) return agent;
+  }
+  return undefined;
+}
+
 /** Parse a Server-Sent Events stream into the JSON payload of each `data:` event. */
 async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<unknown> {
   const reader = body.getReader();
@@ -132,7 +141,7 @@ export async function* askCoordinator(
         state = FINAL_STATES[raw];
         if (messageText && !text) text = messageText;
       } else if (messageText) {
-        yield { type: "progress", text: messageText };
+        yield { type: "progress", text: messageText, agent: agentOf(statusMessage?.parts) };
       }
     }
   }

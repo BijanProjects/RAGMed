@@ -3,9 +3,11 @@
 import Link from "next/link";
 import Script from "next/script";
 import { useCallback, useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 
-import type { Appointment, ChatAction, ChatEvent, Offer, ReplyData, Slot } from "@/lib/types";
+import { Sources, linkCitations, withoutSourcesBlock } from "@/components/sources";
+
+import type { Appointment, ChatAction, ChatEvent, Offer, ReplyData, Slot, Step } from "@/lib/types";
 
 const CLINIC_TIME_ZONE = process.env.NEXT_PUBLIC_CLINIC_TIME_ZONE ?? "America/St_Johns";
 const EMAIL = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$/;
@@ -49,7 +51,7 @@ interface Message {
   role: "patient" | "assistant";
   text: string;
   data?: ReplyData | null;
-  progress: string[];
+  progress: Step[]; // what each agent did while this reply was prepared
   pending: boolean;
   failed?: boolean;
 }
@@ -66,6 +68,15 @@ const EXAMPLES = [
   "I need to renew my blood pressure prescription",
   "What causes asthma?",
 ];
+
+/** The care team: each agent's colour and what it does. */
+const AGENTS: Record<string, { dot: string; role: string }> = {
+  "Care Coordinator": { dot: "bg-sky-500", role: "Talks with you, decides what to ask, and briefs your clinician" },
+  "Diagnosis agent": { dot: "bg-violet-500", role: "Weighs the medical evidence as you talk" },
+  "Knowledge base": { dot: "bg-emerald-500", role: "Searches the clinic's medical sources (MedQuAD)" },
+  Scheduling: { dot: "bg-amber-500", role: "Finds open times and books your visit" },
+};
+const COORDINATOR = "Care Coordinator";
 
 const URGENCY: Record<string, { label: string; style: string }> = {
   self_care: { label: "Self-care", style: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200" },
@@ -150,7 +161,8 @@ export function Chat() {
       if (CHECK_ENABLED) setVerified(true); // the server set a session cookie
       for await (const event of readEvents(response)) {
         if (event.type === "progress") {
-          update(replyId, (m) => ({ ...m, progress: [...m.progress, event.text] }));
+          const step = { agent: event.agent ?? COORDINATOR, text: event.text };
+          update(replyId, (m) => ({ ...m, progress: [...m.progress, step] }));
         } else if (event.type === "reply") {
           if (event.contextId) setContextId(event.contextId);
           update(replyId, (m) => ({
@@ -184,6 +196,7 @@ export function Chat() {
   const card = messages.at(-3); // the card, the patient's button press, then the error
   const isCard = card?.data?.kind === "slots" || card?.data?.kind === "verify_email";
   const live = new Set([last?.id, retryable && isCard ? card.id : undefined]);
+  const working = busy ? (last?.progress.at(-1)?.agent ?? COORDINATOR) : undefined;
 
   return (
     <div
@@ -201,8 +214,10 @@ export function Chat() {
         <div>
           <h1 className="text-lg font-semibold">RAGMed Clinic</h1>
           <p className="text-sm text-neutral-500">
-            Tell us what&apos;s wrong. We ask a few questions, draft a note for your clinician, and book your visit.
+            Tell us what&apos;s wrong. Our care team asks only what matters, briefs your clinician, and books your
+            visit.
           </p>
+          <CareTeam working={working} />
         </div>
         {messages.length > 0 && (
           <button
@@ -300,6 +315,14 @@ function Bubble({
   active: boolean;
   onSend: (outgoing: Outgoing) => void;
 }) {
+  const [openSources, setOpenSources] = useState<Set<number>>(new Set());
+  const openSource = (number: number) => {
+    setOpenSources((all) => new Set(all).add(number));
+    requestAnimationFrame(() =>
+      document.getElementById(`source-${message.id}-${number}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+    );
+  };
+
   if (message.role === "patient") {
     return (
       <div className="flex justify-end">
@@ -311,6 +334,8 @@ function Bubble({
   }
 
   const data = message.data;
+  const sources = data?.sources ?? [];
+  const prefix = `source-${message.id}`;
   const emergency = data?.kind === "emergency" || data?.urgency === "emergency";
   const booked = data?.kind === "booked";
   const urgency = data?.urgency ? URGENCY[data.urgency] : undefined;
@@ -329,12 +354,15 @@ function Bubble({
                 : "bg-black/[0.04] dark:bg-white/[0.06]"
         }`}
       >
-        {message.pending && (
-          <p className="flex items-center gap-2 text-sm text-neutral-500">
-            <span className="size-2 animate-pulse rounded-full bg-sky-500" />
-            {message.progress.at(-1) ?? "Thinking"}…
-          </p>
-        )}
+        {message.pending &&
+          (message.progress.length > 0 ? (
+            <StepList steps={message.progress} live />
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-neutral-500">
+              <span className="size-2 animate-pulse rounded-full bg-sky-500" />
+              Thinking…
+            </p>
+          ))}
         {showBadge && (
           <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${urgency.style}`}>
             {urgency.label}
@@ -345,10 +373,25 @@ function Bubble({
         ) : (
           message.text && (
             <div className="prose-chat text-[15px] leading-relaxed">
-              <ReactMarkdown>{message.text}</ReactMarkdown>
+              <ReactMarkdown components={markdownLinks(prefix, openSource)}>
+                {sources.length ? linkCitations(withoutSourcesBlock(message.text), prefix, sources) : message.text}
+              </ReactMarkdown>
             </div>
           )
         )}
+        <Sources
+          sources={sources}
+          prefix={prefix}
+          open={openSources}
+          onToggle={(number, isOpen) =>
+            setOpenSources((all) => {
+              const next = new Set(all);
+              if (isOpen) next.add(number);
+              else next.delete(number);
+              return next;
+            })
+          }
+        />
         {data?.kind === "question" && data.quick_replies.length > 0 && (
           <QuickReplies replies={data.quick_replies} active={active} onSend={onSend} />
         )}
@@ -361,8 +404,110 @@ function Bubble({
         {data?.kind === "verify_email" && data.verification && (
           <CodeEntry active={active} onSend={onSend} />
         )}
+        {!message.pending && message.progress.length > 1 && <TeamLog steps={message.progress} />}
       </div>
     </div>
+  );
+}
+
+/** Citation links ("#source-…-2") open that source in place; other links open a new tab. */
+function markdownLinks(prefix: string, openSource: (number: number) => void): Components {
+  return {
+    a: ({ href = "", children }) => {
+      if (href.startsWith(`#${prefix}-`)) {
+        const number = Number(href.slice(prefix.length + 2));
+        return (
+          <a
+            href={href}
+            onClick={(event) => {
+              event.preventDefault();
+              openSource(number);
+            }}
+            className="align-super text-[11px] font-medium text-sky-700 no-underline hover:underline dark:text-sky-300"
+            aria-label={`Source ${number}`}
+          >
+            {children}
+          </a>
+        );
+      }
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="underline">
+          {children}
+        </a>
+      );
+    },
+  };
+}
+
+function dotFor(agent: string): string {
+  return AGENTS[agent]?.dot ?? "bg-neutral-400";
+}
+
+/** The four agents, with the one working right now lit up. */
+function CareTeam({ working }: { working?: string }) {
+  return (
+    <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Care team">
+      {Object.entries(AGENTS).map(([name, agent]) => {
+        const on = working === name;
+        return (
+          <li
+            key={name}
+            title={agent.role}
+            data-working={on}
+            className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs transition-colors ${
+              on
+                ? "border-black/25 bg-black/5 text-neutral-900 dark:border-white/30 dark:bg-white/10 dark:text-neutral-100"
+                : "border-black/10 text-neutral-500 dark:border-white/10"
+            }`}
+          >
+            <span className={`size-1.5 rounded-full ${agent.dot} ${on ? "animate-pulse" : "opacity-60"}`} />
+            {name}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Each step as "Agent · what it did"; while `live`, the newest one pulses. */
+function StepList({ steps, live = false }: { steps: Step[]; live?: boolean }) {
+  return (
+    <ol className="space-y-1.5 text-sm" aria-label="Care team activity">
+      {steps.map((step, index) => {
+        const current = live && index === steps.length - 1;
+        return (
+          <li key={index} className={`flex gap-2 ${current ? "" : "text-neutral-500"}`}>
+            <span
+              className={`mt-[0.45rem] size-2 shrink-0 rounded-full ${dotFor(step.agent)} ${current ? "animate-pulse" : ""}`}
+            />
+            <span>
+              <span className="font-medium text-neutral-700 dark:text-neutral-300">{step.agent}</span> · {step.text}
+              {current && "…"}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** After a reply: what the care team did to prepare it, folded away. */
+function TeamLog({ steps }: { steps: Step[] }) {
+  const agents = [...new Set(steps.map((step) => step.agent))];
+  return (
+    <details className="border-t border-black/5 pt-2 dark:border-white/10">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300">
+        <span className="flex -space-x-0.5">
+          {agents.map((agent) => (
+            <span key={agent} className={`size-2 rounded-full ring-2 ring-white dark:ring-neutral-900 ${dotFor(agent)}`} />
+          ))}
+        </span>
+        How the care team worked on this · {steps.length} steps
+      </summary>
+      <div className="mt-2">
+        <StepList steps={steps} />
+      </div>
+    </details>
   );
 }
 

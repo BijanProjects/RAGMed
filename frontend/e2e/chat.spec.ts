@@ -235,3 +235,48 @@ test("after a booking error the time picker can be used again", async ({ page })
   await fill();
   await expect(page.getByRole("form", { name: "Enter your code" })).toBeVisible();
 });
+
+test("each step names its agent, and the team's work stays available after the reply", async ({ page }) => {
+  await mockChat(page, () => [
+    { type: "progress", text: "Reading your message", agent: "Care Coordinator" },
+    { type: "progress", text: "Searched for “one-sided headache”: 4 passages", agent: "Knowledge base" },
+    { type: "progress", text: "Weighed the evidence: considering migraine", agent: "Diagnosis agent" },
+    reply("question", "Does light or noise make it worse?"),
+  ]);
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("headaches on one side");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Does light or noise make it worse?")).toBeVisible();
+
+  await page.getByText("How the care team worked on this · 3 steps").click();
+  const log = page.getByRole("list", { name: "Care team activity" });
+  await expect(log).toContainText("Knowledge base · Searched for “one-sided headache”: 4 passages");
+  await expect(log).toContainText("Diagnosis agent · Weighed the evidence: considering migraine");
+});
+
+test("a citation opens the passage it came from, with a link to read more", async ({ page }) => {
+  const source = {
+    number: 1,
+    question: "What are the symptoms of Asthma?",
+    answer_id: "a1",
+    excerpt: "Common asthma symptoms include coughing, wheezing and chest tightness.",
+  };
+  await mockChat(page, () => [
+    reply("answer", "Wheezing is a common sign of asthma [1].\n\n**Sources** (MedQuAD):\n1. What are the symptoms of Asthma?", {
+      sources: [source],
+    }),
+  ]);
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("Why do I wheeze?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("link", { name: "Source 1" }).click();
+
+  const card = page.locator("details", { hasText: "What are the symptoms of Asthma?" });
+  await expect(card.getByText("Common asthma symptoms include")).toBeVisible();
+  const more = card.getByRole("link", { name: /Read more on MedlinePlus/ });
+  await expect(more).toHaveAttribute("href", /medlineplus.*query=Asthma$/);
+  await expect(more).toHaveAttribute("target", "_blank");
+  await expect(page.getByText("1. What are the symptoms of Asthma?")).toHaveCount(0); // shown as a card, not a list
+});

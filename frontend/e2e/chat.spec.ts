@@ -321,3 +321,27 @@ test("'None of these' clears the other choices", async ({ page }) => {
   await expect(page.getByText("How long have you had the cough?")).toBeVisible();
   expect(requests[1].message).toBe("None of these");
 });
+
+test("after an emergency the patient can say it has passed, and a general answer has no self-care badge", async ({ page }) => {
+  const requests = await mockChat(page, (body) =>
+    body.message === "my face is drooping"
+      ? [reply("emergency", "**This may be a medical emergency.**", {
+          urgency: "emergency", quick_replies: ["I've called for help", "It's not happening right now"],
+        })]
+      : body.message === "What causes asthma?"
+        ? [reply("answer", "Genes and environment [1].", { urgency: "self_care" })]
+        : [reply("question", "Good. Let's carry on.")],
+  );
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("What causes asthma?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Genes and environment")).toBeVisible();
+  await expect(page.getByText("Self-care", { exact: true })).toHaveCount(0);
+
+  await page.getByLabel("Your message").fill("my face is drooping");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByRole("button", { name: "It's not happening right now" }).click();
+  await expect(page.getByText("Good. Let's carry on.")).toBeVisible();
+  expect(requests.at(-1)?.message).toBe("It's not happening right now");
+});

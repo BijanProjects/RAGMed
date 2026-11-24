@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from coordinator_agent.intake import CaseUpdate, Handoff, IntakeTurn
+from coordinator_agent.intake import CaseUpdate, Handoff, IntakeTurn, Support
 from coordinator_agent.router import Intent, Route
 from coordinator_agent.scheduling import SchedulingError
 from ragmed_a2a.client import AgentEvent, Progress, Reply
@@ -89,6 +89,7 @@ class FakeInterviewer:
     calls: list[tuple[dict[str, str], str]] = field(default_factory=list)
     briefings: list[str] = field(default_factory=list)
     handoffs: list[str] = field(default_factory=list)
+    supported: list[tuple[str, str]] = field(default_factory=list)
 
     async def next_turn(
         self, case: Mapping[str, str], transcript: str, briefing: str = ""
@@ -108,6 +109,14 @@ class FakeInterviewer:
                 multi_select=self.choices is not None,
             )
         return IntakeTurn(updates=updates, complete=True, next_question="", quick_replies=[])
+
+    async def support(self, category: str, transcript: str) -> Support:
+        """Resumes when the patient says it is not happening; otherwise stays with them."""
+        self.supported.append((category, transcript))
+        latest = transcript.splitlines()[-1].casefold()
+        if "not happening" in latest or "passed" in latest:
+            return Support(reply="Good, I'm glad it has passed.", resume=True)
+        return Support(reply="Emergency departments need no appointment. Call now.", resume=False)
 
     async def handoff(self, case: Mapping[str, str], briefing: str, assessment: str) -> Handoff:
         self.handoffs.append(assessment)

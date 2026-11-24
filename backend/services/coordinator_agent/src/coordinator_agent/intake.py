@@ -97,6 +97,12 @@ Deciding what to ask
 - Never repeat a question from "Questions already asked". If an answer missed your question,
   rephrase it once at most, then move on.
 
+If their latest message asks you something, asks for help or advice, or raises a worry, never
+skip it: answer it first in `acknowledgement`, in up to two short sentences, honestly (you cannot
+diagnose; say what happens next; if it sounds urgent, tell them to call their local emergency
+number or go to an emergency department). Then continue with your question, or set `complete`
+if they need to be seen now.
+
 How to talk
 - Sound like a warm, competent person, not a form. In `acknowledgement`, when it fits, react
   briefly and specifically to what they just said ("A month of that sounds exhausting.", "Good,
@@ -145,7 +151,9 @@ class IntakeTurn(BaseModel):
     updates: list[CaseUpdate]
     complete: bool
     acknowledgement: str = Field(
-        default="", description="One short, specific reaction to their answer; may be empty."
+        default="",
+        description="A short, specific reaction to their answer, or the answer to their "
+        "question; may be empty.",
     )
     next_question: str = Field(description="The one question to ask next; empty if complete.")
     reason: str = Field(default="", description="Why this question matters, in plain words.")
@@ -164,12 +172,35 @@ class Handoff(BaseModel):
     open_questions: list[str] = Field(description="Up to 3 things still to ask or examine.")
 
 
+SUPPORT = """You are the Care Coordinator at RAGMed Clinic. This patient has just been told
+their symptoms may be a medical emergency ({category}) and to call their local emergency number.
+Respond to their latest message the way a calm, caring person on an emergency line would.
+
+- Answer what they actually said. For example, if no doctor is available: emergency
+  departments and emergency services need no appointment and are open day and night, and an
+  emergency number can send help to them.
+- Only general safety steps anyone can follow while help comes (for example: call now, do not
+  drive yourself, stay with someone or unlock the door, sit up if breathing is hard, keep the
+  phone on). Never name a medicine or a dose; at most, "use the rescue medicine your clinician
+  prescribed for this, as you were told".
+- Plain words, under 90 words.
+- Set `resume` to true only if they clearly say the symptoms are not happening now, happened
+  in the past, or were a mistake. Then say you will carry on with the questions."""
+
+
+class Support(BaseModel):
+    reply: str = Field(description="What to say to the patient, under 90 words.")
+    resume: bool = Field(description="True only if the emergency is clearly not happening now.")
+
+
 class Interviewer(Protocol):
     async def next_turn(
         self, case: Mapping[str, str], transcript: str, briefing: str = ""
     ) -> IntakeTurn: ...
 
     async def handoff(self, case: Mapping[str, str], briefing: str, assessment: str) -> Handoff: ...
+
+    async def support(self, category: str, transcript: str) -> Support: ...
 
 
 class LlmInterviewer:
@@ -198,6 +229,10 @@ class LlmInterviewer:
             f"Diagnosis agent's assessment:\n{assessment}"
         )
         return await ask_structured(self._models, Handoff, HANDOFF, user)
+
+    async def support(self, category: str, transcript: str) -> Support:
+        system = SUPPORT.format(category=category.replace("_", " "))
+        return await ask_structured(self._models, Support, system, f"Conversation:\n{transcript}")
 
 
 NO_PICTURE = "Working picture: none yet (the knowledge base has not been searched)."
@@ -290,6 +325,14 @@ _STOCK = re.compile(
     r"(sharing|letting me know)( that| this)?[.!]?",
     re.IGNORECASE,
 )
+
+
+def is_none(answer: str) -> bool:
+    """True for "None of these", "no", "none" and the like, as an answer to a checklist."""
+    words = answer.casefold().strip(" .!")
+    return words in {"no", "nope", "none", "nothing", "neither"} or words.startswith(
+        ("none", "no, none", "no none", "not any")
+    )
 
 
 def natural(acknowledgement: str) -> str:

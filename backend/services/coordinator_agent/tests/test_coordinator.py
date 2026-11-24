@@ -116,10 +116,53 @@ async def test_a_red_flag_mid_interview_is_escalated_and_the_interview_resumes()
     await chat.send("I keep getting headaches")
 
     alarm = await chat.send("now my face is drooping")
-    resumed = await chat.send("About a month")
+    resumed = await chat.send("It's not happening right now, it was yesterday")
 
     assert data(alarm)["kind"] == "emergency"
+    assert data(alarm)["quick_replies"] == ["I've called for help", "It's not happening right now"]
     assert data(resumed)["kind"] == "question"
+    assert resumed.text.endswith("Let's carry on. How long have you had it?")
+    assert data(await chat.send("About a month"))["kind"] == "question"
+
+
+async def test_after_an_emergency_the_coordinator_stays_and_answers() -> None:
+    chat = Chat()
+    await chat.send("I keep getting headaches")
+    await chat.send("now my face is drooping")
+
+    reply = await chat.send("doctors are not available what should i do?")
+
+    assert data(reply)["kind"] == "emergency"
+    assert reply.text.startswith("Emergency departments need no appointment.")
+    assert EMERGENCY_GUIDANCE in reply.text
+    category, transcript = chat.interviewer.supported[0]
+    assert category == "stroke"
+    assert "doctors are not available" in transcript
+    assert len(chat.interviewer.calls) == 1  # no interview question while it is an emergency
+
+
+async def test_a_ticked_warning_sign_ends_the_questions_with_an_urgent_report() -> None:
+    chat = Chat(diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)))
+    await chat.send("I keep getting headaches on one side")
+    await chat.send("About a month")  # then the checklist
+
+    report = await chat.send("Sudden, worst-ever headache")  # the screen catches this one too
+    assert data(report)["kind"] == "emergency"
+
+    chat = Chat(
+        diagnosis=FakeDiagnosis(
+            consult={**WITH_SIGNS, "warning_signs": ["A fever that will not come down"]}
+        )
+    )
+    await chat.send("I keep getting headaches on one side")
+    await chat.send("About a month")
+    report = await chat.send("A fever that will not come down")
+
+    payload = data(report)
+    assert payload["kind"] == "report"
+    assert payload["urgency"] == "urgent"
+    assert payload["report"]["urgency_score"] == 2
+    assert report.text.startswith("**Some of what you ticked can be serious.**")
 
 
 # The intake interview --------------------------------------------------------------------

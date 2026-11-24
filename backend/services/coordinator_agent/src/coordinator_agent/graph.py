@@ -2,6 +2,8 @@
 
     screen ─ red flag ─────────────────────────────────────────────▶ emergency
        └ dispatch ─ a button (show times, book) ─────────────────────▶ act
+                  ├ after an emergency ─▶ support ─ still happening ─▶ (stay with them)
+                  │                              └ it has passed ────▶ (resume)
                   ├ intake under way ─▶ interview ─ more to ask ─────▶ (question)
                   │                          └ enough ─▶ assess ─────▶ (report + handoff + offer)
                   └ route ─ symptoms or booking ─▶ interview
@@ -39,6 +41,7 @@ from coordinator_agent.intake import (
     briefing,
     case_lines,
     case_summary,
+    is_none,
     is_repeat,
     lead_names,
     merge,
@@ -54,6 +57,7 @@ from coordinator_agent.reply import (
     OUT_OF_SCOPE,
     Offer,
     Reply,
+    at_least,
     build_report,
     from_diagnosis,
     report_reply,
@@ -87,6 +91,7 @@ HISTORY_TURNS = 6
 MAX_CONSULTS = 6  # knowledge-base consults per intake; each costs one small-model call
 HISTORY_CHARS = 600
 UNAVAILABLE = "I could not get an answer just now. Please try again in a moment."
+AFTER_ALARM = ["I've called for help", "It's not happening right now"]
 NO_REPORT = "There is no report to book a visit for yet. Tell me what's bothering you first."
 
 
@@ -109,7 +114,9 @@ class State(TypedDict, total=False):
     client: str
     # Saved across turns
     history: Annotated[list[Turn], operator.add]
-    phase: str  # "chat" | "intake" | "report" | "booked"
+    phase: str  # "chat" | "intake" | "emergency" | "report" | "booked"
+    alert: dict[str, str] | None  # the red flag, and the phase to go back to once it passes
+    signs_present: str  # warning signs the patient ticked
     case: dict[str, str]
     interview: list[Turn]
     questions: int
@@ -173,15 +180,47 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             urgency="emergency",
             recommend_visit=True,
             red_flag=flag.category,
+            quick_replies=AFTER_ALARM,
         )
-        return {"intent": "emergency", "reply": reply.model_dump()}
+        phase = state.get("phase") or "chat"
+        before = (state.get("alert") or {}).get("before", phase) if phase == "emergency" else phase
+        alert = {"category": flag.category, "guidance": flag.guidance, "before": before}
+        return {"intent": "emergency", "phase": "emergency", "alert": alert, **said(reply)}
 
     def dispatch(state: State) -> str:
         if state["intent"] == "emergency":
             return "remember"
         if state.get("action"):
             return "act"
+        if state.get("phase") == "emergency":
+            return "support"
         return "interview" if state.get("phase") == "intake" else "route"
+
+    async def support(state: State) -> State:
+        """After an emergency warning: stay with the patient and answer what they ask."""
+        alert = state.get("alert") or {"category": "emergency", "guidance": "", "before": "chat"}
+        turns: list[Turn] = [
+            *state.get("history", []),
+            {"role": "patient", "text": state["message"]},
+        ]
+        answer = await interviewer.support(alert["category"], history_text(turns, 8))
+        if answer.resume:
+            phase = alert["before"] if alert["before"] in ("intake", "chat", "report") else "chat"
+            asked = state.get("asked", [])
+            again = f"\n\nLet's carry on. {asked[-1]}" if phase == "intake" and asked else ""
+            reply = Reply(kind="question", text=f"{answer.reply.strip()}{again}")
+            return {"phase": phase, "alert": None, **said(reply)}
+        step("Staying with you: the emergency comes first")
+        guidance = alert.get("guidance") or EMERGENCY_GUIDANCE
+        reply = Reply(
+            kind="emergency",
+            text=f"{answer.reply.strip()}\n\n{guidance}",
+            urgency="emergency",
+            recommend_visit=True,
+            red_flag=alert["category"],
+            quick_replies=AFTER_ALARM,
+        )
+        return said(reply)
 
     async def route_node(state: State) -> State:
         route = await router.route(state["message"], history_text(state.get("history", [])))
@@ -195,6 +234,9 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             update["reply"] = Reply(kind="question", text=BOOKING_START).model_dump()
             update["interview"] = [{"role": "assistant", "text": BOOKING_START}]
         return update
+
+    def said(reply: Reply) -> State:
+        return {"reply": reply.model_dump()}
 
     def after_route(state: State) -> str:
         if state["intent"] == "symptoms":
@@ -238,6 +280,15 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             if not _nothing_more(state["message"]):
                 case["other_notes"] = state["message"]
             return {**progress, "interview": transcript, "phase": "assessing"}
+        if asked and asked[-1] == WARNING_CHECK and not is_none(state["message"]):
+            # A warning sign: no more questions, the clinician needs this today.
+            step("You have a warning sign: preparing an urgent report now")
+            return {
+                **progress,
+                "interview": transcript,
+                "signs_present": state["message"][:500],
+                "phase": "assessing",
+            }
 
         done = (
             turn.complete
@@ -293,6 +344,9 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             text = (final.text if final and final.text else UNAVAILABLE) + f"\n\n_{DISCLAIMER}_"
             return {"phase": "intake", "reply": Reply(kind="no_answer", text=text).model_dump()}
         data = final.data[0]
+        signs = state.get("signs_present", "")
+        if signs:  # never less than urgent once the patient has a warning sign
+            data = {**data, "urgency": at_least(str(data.get("urgency", "routine")), "urgent")}
         step("Writing the handoff note and urgency score for your clinician")
         assessment = (
             f"{data.get('answer', '')}\nPossible conditions: "
@@ -300,7 +354,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             f"Urgency from the evidence: {data.get('urgency', 'routine')}"
         )
         handoff = await interviewer.handoff(state["case"], briefing(picture), assessment)
-        report = build_report(state["case"], data, handoff.model_dump())
+        report = build_report(state["case"], data, {**handoff.model_dump(), "warning_signs": signs})
         reply = report_reply(report, EMERGENCY_GUIDANCE)
         offer = reply.offer.model_dump() if reply.offer else None
         return {"phase": "report", "report": report, "offer": offer, "reply": reply.model_dump()}
@@ -467,16 +521,19 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         ("interview", interview),
         ("assess", assess),
         ("act", act),
+        ("support", support),
         ("answer", answer),
         ("canned", canned),
         ("remember", remember),
     ]:
         graph.add_node(name, node)
     graph.add_edge(START, "screen")
-    graph.add_conditional_edges("screen", dispatch, ["remember", "act", "interview", "route"])
+    graph.add_conditional_edges(
+        "screen", dispatch, ["remember", "act", "support", "interview", "route"]
+    )
     graph.add_conditional_edges("route", after_route, ["interview", "remember", "answer", "canned"])
     graph.add_conditional_edges("interview", after_interview, ["assess", "remember"])
-    for name in ("assess", "act", "answer", "canned"):
+    for name in ("assess", "act", "support", "answer", "canned"):
         graph.add_edge(name, "remember")
     graph.add_edge("remember", END)
     return graph.compile(checkpointer=checkpointer)
@@ -499,6 +556,8 @@ def _new_intake() -> State:
         "asked": [],
         "asked_final": False,
         "signs_checked": False,
+        "signs_present": "",
+        "alert": None,
         "consult": None,
         "consults": 0,
         "report": None,

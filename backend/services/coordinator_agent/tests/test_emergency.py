@@ -22,6 +22,7 @@ EMERGENCIES = [
     ("my toddler swallowed bleach", "poisoning"),
     ("I took too many pills", "poisoning"),
     ("worst headache of my life, came on suddenly", "severe_pain"),
+    ("Sudden, worst-ever headache", "severe_pain"),
     ("I have a fever and a stiff neck", "severe_pain"),
     ("I want to kill myself", "self_harm"),
     ("I don\u2019t want to live anymore", "self_harm"),  # curly apostrophe, as phones type it

@@ -59,6 +59,18 @@ _LEAST_URGENT_SCORE = {"emergency": 1, "urgent": 2, "routine": 4, "self_care": 5
 _URGENCY_FOR_SCORE = {1: "emergency", 2: "urgent", 3: "routine", 4: "routine", 5: "self_care"}
 
 
+URGENT_SIGNS = (
+    "**Some of what you ticked can be serious.** If it is happening now or getting worse, call "
+    "your local emergency number. Otherwise, please be seen today."
+)
+_ORDER = ["self_care", "routine", "urgent", "emergency"]
+
+
+def at_least(urgency: str, floor: str) -> str:
+    """The more urgent of the two."""
+    return max(urgency, floor, key=lambda u: _ORDER.index(u) if u in _ORDER else 1)
+
+
 def triage(evidence_urgency: str, proposed: int | None) -> tuple[int, str]:
     """The urgency score and the urgency the clinic acts on.
 
@@ -178,6 +190,7 @@ def build_report(
         "score_reason": str(handoff.get("score_reason", "")).strip(),
         "assessment": _without_disclaimer(str(data.get("answer", ""))),
         "possible_conditions": [str(c) for c in data.get("possible_conditions", [])],
+        "warning_signs": str(handoff.get("warning_signs", "")),
         "urgency": urgency,
         "clinician_type": clinician,
         "visit_minutes": minutes,
@@ -194,6 +207,8 @@ def report_reply(report: dict[str, Any], urgent_guidance: str) -> Reply:
     lines = [f"## {report['title']}", f"_{report['notice']}_"]
     if urgency == "emergency":
         lines.insert(0, urgent_guidance)
+    elif report.get("warning_signs"):
+        lines.insert(0, URGENT_SIGNS)
     score = report.get("urgency_score")
     if score in SCORE_TEXT:
         lines.append(

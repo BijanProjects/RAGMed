@@ -35,6 +35,12 @@ function topic(question: string): string {
     .slice(0, 120);
 }
 
+/** "What causes Asthma? The exact cause…" → "What causes Asthma?": the passage is shown below. */
+function title(question: string): string {
+  const mark = question.indexOf("? ");
+  return mark > 0 && question.endsWith("…") ? question.slice(0, mark + 1) : question;
+}
+
 /** Numbered sources; each opens to the passage that was read, with a link to read more. */
 export function Sources({
   sources,
@@ -61,7 +67,7 @@ export function Sources({
         >
           <summary className="flex cursor-pointer gap-2 px-3 py-2 hover:bg-black/[0.03] dark:hover:bg-white/5">
             <span className="font-mono text-xs leading-5 text-sky-700 dark:text-sky-300">[{source.number}]</span>
-            <span className="flex-1">{source.question}</span>
+            <span className="flex-1">{title(source.question)}</span>
           </summary>
           <div className="space-y-2 border-t border-black/5 px-3 py-2 dark:border-white/10">
             {source.excerpt ? (

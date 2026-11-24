@@ -68,6 +68,7 @@ _RULES: list[tuple[str, str, list[str]]] = [
     ]),
     ("severe_pain", EMERGENCY_GUIDANCE, [
         r"\bworst headache (of|in) my life\b", r"\bsudden severe headache\b",
+        r"\bworst[- ]ever headache\b", r"\bthunderclap\b",
         r"\bstiff neck\b.*\bfever\b|\bfever\b.*\bstiff neck\b",
     ]),
 ]  # fmt: skip

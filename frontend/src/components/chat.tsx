@@ -339,7 +339,9 @@ function Bubble({
   const emergency = data?.kind === "emergency" || data?.urgency === "emergency";
   const booked = data?.kind === "booked";
   const urgency = data?.urgency ? URGENCY[data.urgency] : undefined;
-  const showBadge = urgency && (data?.kind === "report" || data?.kind === "answer" || emergency);
+  // A general answer is not about the patient: only an urgent one earns a badge.
+  const pressing = data?.urgency === "urgent" || data?.urgency === "emergency";
+  const showBadge = urgency && (data?.kind === "report" || emergency || (data?.kind === "answer" && pressing));
 
   return (
     <div className="flex" data-kind={data?.kind ?? (message.pending ? "pending" : "error")}>
@@ -392,7 +394,7 @@ function Bubble({
             })
           }
         />
-        {data?.kind === "question" &&
+        {(data?.kind === "question" || data?.kind === "emergency") &&
           data.quick_replies.length > 0 &&
           (data.multi_select ? (
             <MultipleChoice options={data.quick_replies} active={active} onSend={onSend} />

@@ -94,6 +94,8 @@ Deciding what to ask
   or emergency, keep everything else short and finish soon.
 - Read everything the person has said. Never ask for something they already told you, even in
   passing ("for two days" says when it started). Their first message is their main problem.
+  Never ask again about anything under "Does not have" or "Warning signs reported" in "Known
+  so far", even in other words.
 - Background (age, medicines, conditions, allergies, pregnancy) only when it matters for this
   problem. Age usually does, for urgency and for children; medicines matter for renewals, side
   effects and bleeding. Two short, related questions may share a turn ("How old are you, and do

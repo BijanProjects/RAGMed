@@ -114,6 +114,7 @@ def build_server(
             "qtype": answer.qtype,
             "text": answer.answer,
             "source": SOURCE,
+            "url": knowledge.url(answer.id),
         }
 
     @mcp.tool(annotations=READ_ONLY)

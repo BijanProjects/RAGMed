@@ -3,7 +3,7 @@ VENV   := .venv
 BIN    := $(VENV)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help venv install install-bench lock lint format typecheck test check clean search report significance export-onnx benchmark-all mcp-ingest mcp-serve
+.PHONY: help venv install install-bench lock lint format typecheck test check clean search report significance export-onnx benchmark-all medquad-sources mcp-ingest mcp-serve
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -60,6 +60,9 @@ benchmark-all: ## Re-run every experiment (~1 h on a GPU); progress: tail -f dat
 	evals/run_all.sh
 
 VECTORS ?= $(firstword $(wildcard data/artifacts/embeddings/BAAI__bge-m3-*.npy))
+medquad-sources: ## Link each answer to its NIH page:  make medquad-sources XML=path/to/MedQuAD
+	$(BIN)/python -m ragmed_retrieval sources "$(XML)"
+
 mcp-ingest: ## Load the knowledge base into the local vector store (needs make search or benchmark first)
 	$(BIN)/python -m mcp_medical ingest $(if $(VECTORS),--vectors $(VECTORS))
 

@@ -27,15 +27,21 @@ class Passage:
     text: str
     score: float
     source: str = SOURCE
+    url: str = ""  # the NIH page the answer comes from, when it still loads
 
 
 class KnowledgeBase:
     def __init__(
-        self, embedder: Embedder, store: VectorStore, answers: Mapping[str, QAPair]
+        self,
+        embedder: Embedder,
+        store: VectorStore,
+        answers: Mapping[str, QAPair],
+        urls: Mapping[str, str] | None = None,
     ) -> None:
         self._embedder = embedder
         self._store = store
         self._answers = answers
+        self._urls = dict(urls or {})
         self._topics = dict(Counter(a.qtype for a in answers.values()).most_common())
 
     @property
@@ -49,6 +55,9 @@ class KnowledgeBase:
 
     def answer(self, answer_id: str) -> QAPair | None:
         return self._answers.get(answer_id)
+
+    def url(self, answer_id: str) -> str:
+        return self._urls.get(answer_id, "")
 
     async def search(self, query: str, top_k: int = 5, qtype: str | None = None) -> list[Passage]:
         # Embedding is CPU work (about 10 ms); keep it off the event loop.
@@ -71,6 +80,7 @@ class KnowledgeBase:
                     qtype=str(hit.metadata["qtype"]),
                     text=hit.text,
                     score=round(hit.score, 4),
+                    url=self.url(answer_id),
                 )
         return list(passages.values())[:top_k]
 

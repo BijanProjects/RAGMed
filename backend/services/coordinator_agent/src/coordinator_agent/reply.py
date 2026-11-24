@@ -87,6 +87,7 @@ class Source(BaseModel):
     question: str
     answer_id: str
     excerpt: str = ""  # the passage text, shown when the reader opens the source
+    url: str = ""  # the NIH page it comes from, if known
 
 
 class Offer(BaseModel):
@@ -122,6 +123,7 @@ def _sources(data: dict[str, Any]) -> list[Source]:
             question=str(c["question"]),
             answer_id=str(c["answer_id"]),
             excerpt=str(c.get("excerpt", "")),
+            url=str(c.get("url", "")),
         )
         for c in data.get("citations", [])
     ]

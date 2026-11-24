@@ -40,4 +40,5 @@ async def knowledge() -> KnowledgeBase:
     chunks = chunk_pairs(PAIRS)
     store = InMemoryStore()
     await index_chunks(store, chunks, embedder.embed_documents([c.text for c in chunks]))
-    return KnowledgeBase(embedder, store, {p.id: p for p in PAIRS})
+    urls = {"d1": "https://medlineplus.gov/diabetes.html"}
+    return KnowledgeBase(embedder, store, {p.id: p for p in PAIRS}, urls)

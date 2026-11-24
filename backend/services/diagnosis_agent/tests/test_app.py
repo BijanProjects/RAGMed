@@ -46,6 +46,7 @@ async def test_answers_over_a2a_with_progress_and_structured_data() -> None:
     assert data["urgency"] == "routine"
     assert data["citations"][0]["answer_id"] == "a2"
     assert data["citations"][0]["excerpt"] == "Asthma is treated with inhalers."
+    assert data["citations"][0]["url"] == "https://medlineplus.gov/asthma.html"
     assert data["sufficient_evidence"] is True
 
 

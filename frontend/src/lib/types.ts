@@ -16,6 +16,7 @@ export interface Source {
   question: string;
   answer_id: string;
   excerpt?: string; // the passage text the answer relied on
+  url?: string; // the NIH page it comes from, when it still loads
 }
 
 export interface Offer {

@@ -15,7 +15,8 @@ PASSAGES = [
     Passage(answer_id="a1", question="What causes asthma?", qtype="causes",
             text="Asthma is caused by inflamed airways.", score=0.8),
     Passage(answer_id="a2", question="How is asthma treated?", qtype="treatment",
-            text="Asthma is treated with inhalers.", score=0.7),
+            text="Asthma is treated with inhalers.", score=0.7,
+            url="https://medlineplus.gov/asthma.html"),
 ]  # fmt: skip
 
 

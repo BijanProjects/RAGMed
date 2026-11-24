@@ -7,6 +7,9 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+import anyio
+import httpx
+
 from ragmed_retrieval.benchmark import (
     RERANK_DEPTH,
     BenchmarkResult,
@@ -29,6 +32,12 @@ from ragmed_retrieval.evalset import build_eval_set, load_eval_set, save_eval_se
 from ragmed_retrieval.hybrid import RERANKER_PRESETS, BM25Retriever, Reranker
 from ragmed_retrieval.metrics import RetrievalScores, dedupe
 from ragmed_retrieval.onnx import MODEL_FILE, OnnxEmbedder, Pooling, export_onnx
+from ragmed_retrieval.sources import (
+    SOURCES_FILE,
+    check_urls,
+    read_source_urls,
+    save_source_urls,
+)
 
 # Short name -> (Hugging Face id, query prompt name)
 MODEL_PRESETS: dict[str, tuple[str, str | None]] = {
@@ -237,6 +246,15 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--model", default=DEFAULT_MODEL, choices=sorted(ONNX_POOLING))
     export.add_argument("--out", type=Path, default=ONNX_DIR)
 
+    sources = sub.add_parser("sources", help="map each answer to its NIH page (original XML)")
+    sources.add_argument("xml_dir", type=Path, help="the MedQuAD XML release, cloned")
+    sources.add_argument("--corpus", type=Path, default=Path("data/raw/medquad.csv"))
+    sources.add_argument("--out", type=Path, default=SOURCES_FILE)
+    sources.add_argument(
+        "--check", action="store_true",
+        help="keep only pages that still load, at their current address (about 15 minutes)",
+    )  # fmt: skip
+
     report = sub.add_parser("report", help="print a markdown table of saved results")
     report.add_argument("--results", type=Path, default=Path("evals/results"))
     return parser
@@ -256,4 +274,25 @@ def main(
         return _search(args, factory)
     if args.command == "export-onnx":
         return _export(args)
+    if args.command == "sources":
+        return _sources(args)
     return _report(args)
+
+
+async def _check_all(urls: list[str]) -> dict[str, str]:  # pragma: no cover - visits the sites
+    headers = {"User-Agent": "RAGMed source-link checker (educational project)"}
+    async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+        return await check_urls(urls, client)
+
+
+def _sources(args: argparse.Namespace) -> int:
+    pairs, _ = load_medquad(args.corpus)
+    urls = read_source_urls(args.xml_dir, {p.id for p in pairs})
+    if args.check:  # pragma: no cover - visits the NIH sites
+        alive = anyio.run(_check_all, sorted(set(urls.values())))
+        print(f"{len(alive)} of {len(set(urls.values()))} pages still load")
+        urls = {answer: alive[url] for answer, url in urls.items() if url in alive}
+    save_source_urls(urls, args.out)
+    print(f"{len(urls)} of {len(pairs)} answers have a source page ({len(urls) / len(pairs):.1%})")
+    print(f"saved to {args.out}")
+    return 0 if urls else 1

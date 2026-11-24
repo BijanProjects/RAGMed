@@ -17,6 +17,7 @@ class Passage(BaseModel):
     qtype: str
     text: str
     score: float
+    url: str = ""  # the page the answer was published on, if known
 
 
 class GroundingCheck(BaseModel):
@@ -98,6 +99,7 @@ class Citation(BaseModel):
     answer_id: str
     question: str
     excerpt: str = ""  # the passage text the answer relied on, so readers can check it
+    url: str = ""  # the page it comes from, so readers can read it in full
 
 
 class ConsultLead(BaseModel):

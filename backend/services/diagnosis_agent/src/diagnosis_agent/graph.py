@@ -82,6 +82,7 @@ def cite(number: int, passage: Passage) -> Citation:
         answer_id=passage.answer_id,
         question=label(passage),
         excerpt=passage.text[:EXCERPT_CHARS],
+        url=passage.url,
     )
 
 

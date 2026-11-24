@@ -275,7 +275,7 @@ test("a citation opens the passage it came from, with a link to read more", asyn
 
   const card = page.locator("details", { hasText: "What are the symptoms of Asthma?" });
   await expect(card.getByText("Common asthma symptoms include")).toBeVisible();
-  const more = card.getByRole("link", { name: /Read more on MedlinePlus/ });
+  const more = card.getByRole("link", { name: /Search MedlinePlus for this topic/ });
   await expect(more).toHaveAttribute("href", /medlineplus.*query=Asthma$/);
   await expect(more).toHaveAttribute("target", "_blank");
   await expect(page.getByText("1. What are the symptoms of Asthma?")).toHaveCount(0); // shown as a card, not a list
@@ -344,4 +344,21 @@ test("after an emergency the patient can say it has passed, and a general answer
   await page.getByRole("button", { name: "It's not happening right now" }).click();
   await expect(page.getByText("Good. Let's carry on.")).toBeVisible();
   expect(requests.at(-1)?.message).toBe("It's not happening right now");
+});
+
+test("a source with a known page links straight to it", async ({ page }) => {
+  await mockChat(page, () => [
+    reply("answer", "Inhalers help [1].", {
+      sources: [{ number: 1, question: "How is asthma treated?", answer_id: "a2", excerpt: "Inhalers.",
+        url: "https://medlineplus.gov/asthma.html" }],
+    }),
+  ]);
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("asthma treatment");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByRole("link", { name: "Source 1" }).click();
+
+  const link = page.getByRole("link", { name: "Read the full page on medlineplus.gov ↗" });
+  await expect(link).toHaveAttribute("href", "https://medlineplus.gov/asthma.html");
 });

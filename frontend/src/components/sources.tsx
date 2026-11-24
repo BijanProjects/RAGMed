@@ -2,8 +2,8 @@
 
 import type { Source } from "@/lib/types";
 
-// MedQuAD's answers come mostly from NIH consumer health pages. This copy of the corpus does not
-// keep each page's address, so the outside link searches MedlinePlus for the same topic.
+// MedQuAD's answers come from NIH consumer health pages. Most sources link to their page (checked
+// to still load); for the rest, the outside link searches MedlinePlus for the same topic.
 const MEDLINEPLUS_SEARCH =
   "https://vsearch.nlm.nih.gov/vivisimo/cgi-bin/query-meta?v%3Aproject=medlineplus&v%3Asources=medlineplus-bundle&query=";
 
@@ -79,14 +79,25 @@ export function Sources({
             )}
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
               <span>From MedQuAD, a collection of answers from NIH health websites</span>
-              <a
-                href={MEDLINEPLUS_SEARCH + encodeURIComponent(topic(source.question))}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-900 dark:text-sky-300"
-              >
-                Read more on MedlinePlus ↗
-              </a>
+              {source.url && /^https:\/\//.test(source.url) ? (
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-900 dark:text-sky-300"
+                >
+                  Read the full page on {new URL(source.url).hostname.replace(/^www\./, "")} ↗
+                </a>
+              ) : (
+                <a
+                  href={MEDLINEPLUS_SEARCH + encodeURIComponent(topic(source.question))}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-sky-700 underline underline-offset-2 hover:text-sky-900 dark:text-sky-300"
+                >
+                  Search MedlinePlus for this topic ↗
+                </a>
+              )}
             </p>
           </div>
         </details>

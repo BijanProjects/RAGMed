@@ -18,6 +18,7 @@ from ragmed_retrieval.chunking import chunk_pairs
 from ragmed_retrieval.corpus import load_medquad
 from ragmed_retrieval.embedding import Embedder
 from ragmed_retrieval.onnx import OnnxEmbedder
+from ragmed_retrieval.sources import SOURCES_FILE, load_source_urls
 from ragmed_vectorstores.qdrant import QdrantStore
 
 EmbedderFactory = Callable[["MedicalSettings"], Embedder]
@@ -32,6 +33,7 @@ class MedicalSettings(CoreSettings):
     host: str = "127.0.0.1"
     port: int = 9001
     corpus: Path = Path("data/raw/medquad.csv")
+    sources: Path = SOURCES_FILE  # answer id to its NIH page; optional
     onnx_dir: Path = Path("data/artifacts/onnx/BAAI__bge-m3")
     # A Qdrant server URL in production; otherwise an embedded store in this folder.
     qdrant_url: str | None = None
@@ -103,7 +105,8 @@ def create_server(
 
     pairs, _ = load_medquad(settings.corpus)
     embedder = embedder_factory(settings)
-    knowledge = KnowledgeBase(embedder, _store(settings), {p.id: p for p in pairs})
+    urls = load_source_urls(settings.sources)
+    knowledge = KnowledgeBase(embedder, _store(settings), {p.id: p for p in pairs}, urls)
 
     info_path = _index_info_path(settings)
     info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.exists() else {}

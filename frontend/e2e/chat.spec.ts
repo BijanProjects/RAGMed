@@ -280,3 +280,44 @@ test("a citation opens the passage it came from, with a link to read more", asyn
   await expect(more).toHaveAttribute("target", "_blank");
   await expect(page.getByText("1. What are the symptoms of Asthma?")).toHaveCount(0); // shown as a card, not a list
 });
+
+test("a multiple-choice question sends every option ticked", async ({ page }) => {
+  const requests = await mockChat(page, (body) =>
+    body.message === "headaches"
+      ? [reply("question", "Do you have any of these as well?", {
+          quick_replies: ["Nausea", "Light hurts", "Blurred vision"], multi_select: true,
+        })]
+      : [reply("question", "Thanks. How old are you?")],
+  );
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("headaches");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const choices = page.getByRole("group", { name: "Choose all that apply" });
+  await choices.getByRole("checkbox", { name: "Nausea" }).click();
+  await choices.getByRole("checkbox", { name: /Blurred vision/ }).click();
+  await expect(choices.getByRole("checkbox", { name: /Nausea/ })).toHaveAttribute("aria-checked", "true");
+  await choices.getByRole("button", { name: "Send 2 selected" }).click();
+
+  await expect(page.getByText("Thanks. How old are you?")).toBeVisible();
+  expect(requests[1].message).toBe("Nausea, Blurred vision");
+});
+
+test("'None of these' clears the other choices", async ({ page }) => {
+  const requests = await mockChat(page, (body) =>
+    body.message === "cough"
+      ? [reply("question", "Any of these?", { quick_replies: ["Fever", "Wheezing"], multi_select: true })]
+      : [reply("question", "How long have you had the cough?")],
+  );
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("cough");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const choices = page.getByRole("group", { name: "Choose all that apply" });
+  await choices.getByRole("checkbox", { name: "Fever" }).click();
+  await choices.getByRole("checkbox", { name: "None of these" }).click();
+  await choices.getByRole("button", { name: "Send: none of these" }).click();
+
+  await expect(page.getByText("How long have you had the cough?")).toBeVisible();
+  expect(requests[1].message).toBe("None of these");
+});

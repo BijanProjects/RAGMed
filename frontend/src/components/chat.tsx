@@ -392,9 +392,13 @@ function Bubble({
             })
           }
         />
-        {data?.kind === "question" && data.quick_replies.length > 0 && (
-          <QuickReplies replies={data.quick_replies} active={active} onSend={onSend} />
-        )}
+        {data?.kind === "question" &&
+          data.quick_replies.length > 0 &&
+          (data.multi_select ? (
+            <MultipleChoice options={data.quick_replies} active={active} onSend={onSend} />
+          ) : (
+            <QuickReplies replies={data.quick_replies} active={active} onSend={onSend} />
+          ))}
         {data?.kind === "report" && data.offer && (
           <OfferButtons offer={data.offer} active={active} onSend={onSend} />
         )}
@@ -534,6 +538,56 @@ function QuickReplies({
           {reply}
         </button>
       ))}
+    </div>
+  );
+}
+
+const NONE = "None of these";
+
+/** Tick any number of options (or "None of these"), then send them as one answer. */
+function MultipleChoice({
+  options,
+  active,
+  onSend,
+}: {
+  options: string[];
+  active: boolean;
+  onSend: (outgoing: Outgoing) => void;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const toggle = (option: string) =>
+    setPicked((all) =>
+      option === NONE
+        ? all.includes(NONE) ? [] : [NONE]
+        : all.includes(option)
+          ? all.filter((o) => o !== option)
+          : [...all.filter((o) => o !== NONE), option],
+    );
+  const answer = picked.includes(NONE) ? "None of these" : picked.join(", ");
+  return (
+    <div className="space-y-2" role="group" aria-label="Choose all that apply">
+      <p className="text-xs text-neutral-500">Choose all that apply, or type your own answer.</p>
+      <div className="flex flex-wrap gap-2">
+        {[...options, NONE].map((option) => {
+          const on = picked.includes(option);
+          return (
+            <button
+              key={option}
+              role="checkbox"
+              aria-checked={on}
+              disabled={!active}
+              onClick={() => toggle(option)}
+              className={`${chip} ${on ? "border-sky-600 bg-sky-600 text-white hover:bg-sky-700 dark:text-white dark:hover:bg-sky-700" : ""}`}
+            >
+              {on ? "✓ " : ""}
+              {option}
+            </button>
+          );
+        })}
+      </div>
+      <button className={primary} disabled={!active || picked.length === 0} onClick={() => onSend({ text: answer })}>
+        {picked.length === 0 ? "Select one or more" : picked.includes(NONE) ? "Send: none of these" : `Send ${picked.length} selected`}
+      </button>
     </div>
   );
 }

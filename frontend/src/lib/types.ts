@@ -83,6 +83,7 @@ export interface ReplyData {
   sources: Source[];
   red_flag: string | null;
   quick_replies: string[];
+  multi_select?: boolean; // the patient may tick several quick replies
   report: Report | null;
   offer: Offer | null;
   slots: Slot[];

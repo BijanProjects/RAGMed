@@ -116,7 +116,8 @@ class State(TypedDict, total=False):
     history: Annotated[list[Turn], operator.add]
     phase: str  # "chat" | "intake" | "emergency" | "report" | "booked"
     alert: dict[str, str] | None  # the red flag, and the phase to go back to once it passes
-    signs_present: str  # warning signs the patient ticked
+    signs_offered: list[str]  # the warning signs on the checklist
+    signs_present: str  # the warning signs the patient reported
     case: dict[str, str]
     interview: list[Turn]
     questions: int
@@ -274,19 +275,26 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             latest = f"{asked[-1]} {state['message']}" if asked else state["message"]
             picture, consults = await consult(known, latest, picture) or picture, consults + 1
         turn = await interviewer.next_turn(known, history_text(transcript, 40), briefing(picture))
-        case = merge(known, turn.updates)
+        checklist = bool(asked) and asked[-1] == WARNING_CHECK
+        offered = state.get("signs_offered", [])
+        # The checklist answer is recorded by rule, not by the model, which can misread a "Yes".
+        case = (
+            record_signs(known, state["message"], offered)
+            if checklist
+            else merge(known, turn.updates)
+        )
         progress: State = {"case": case, "consult": picture, "consults": consults}
         if state.get("asked_final"):
             if not _nothing_more(state["message"]):
                 case["other_notes"] = state["message"]
             return {**progress, "interview": transcript, "phase": "assessing"}
-        if asked and asked[-1] == WARNING_CHECK and not is_none(state["message"]):
+        if checklist and "warning_signs" in case:
             # A warning sign: no more questions, the clinician needs this today.
             step("You have a warning sign: preparing an urgent report now")
             return {
                 **progress,
                 "interview": transcript,
-                "signs_present": state["message"][:500],
+                "signs_present": case["warning_signs"],
                 "phase": "assessing",
             }
 
@@ -330,6 +338,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             "questions": questions + 1,
             "asked_final": asked_final,
             "signs_checked": state.get("signs_checked", False) or check_signs,
+            "signs_offered": signs if check_signs else offered,
             "reply": reply.model_dump(),
         }
 
@@ -537,6 +546,18 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         graph.add_edge(name, "remember")
     graph.add_edge("remember", END)
     return graph.compile(checkpointer=checkpointer)
+
+
+def record_signs(case: dict[str, str], answer: str, offered: list[str]) -> dict[str, str]:
+    """The checklist answer, in the case: the signs reported, or that none of them were."""
+    listed = ", ".join(offered) or "the warning signs asked about"
+    if is_none(answer):
+        previous = case.get("negatives")
+        none = f"none of: {listed}"
+        return {**case, "negatives": f"{previous}; {none}" if previous else none}
+    named = [sign for sign in offered if sign.casefold() in answer.casefold()]
+    reported = ", ".join(named) if named else f"answered “{answer.strip()[:200]}” to: {listed}"
+    return {**case, "warning_signs": reported}
 
 
 def _nothing_more(text: str) -> bool:

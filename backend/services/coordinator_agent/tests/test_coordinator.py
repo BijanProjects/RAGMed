@@ -163,6 +163,8 @@ async def test_a_ticked_warning_sign_ends_the_questions_with_an_urgent_report() 
     assert payload["urgency"] == "urgent"
     assert payload["report"]["urgency_score"] == 2
     assert report.text.startswith("**Some of what you ticked can be serious.**")
+    assert payload["report"]["case"]["Warning signs reported"] == "A fever that will not come down"
+    assert "Warning signs reported: A fever" in chat.diagnosis.questions[0]
 
 
 # The intake interview --------------------------------------------------------------------

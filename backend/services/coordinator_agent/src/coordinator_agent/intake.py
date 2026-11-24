@@ -52,6 +52,7 @@ CaseField = Literal[
 
 LABELS: dict[str, str] = {
     "main_problem": "Main problem",
+    "warning_signs": "Warning signs reported",
     "onset": "Started",
     "duration": "Duration",
     "location": "Where",
@@ -133,7 +134,8 @@ clinician who will see them. From the intake, the working picture and the Diagno
 assessment, write:
 
 - impression: 2 or 3 sentences for the clinician: the presenting problem and its key features,
-  the important negatives, and the possibilities the assessment raised. Not a diagnosis.
+  the important negatives, and the possibilities the assessment raised. Not a diagnosis. If
+  the intake lists "Warning signs reported", open with them and never say there were none.
 - urgency_score from 1 to 5: 1 emergency, now; 2 today; 3 within a few days; 4 routine, within a
   week or two; 5 self-care is likely enough. Move it up for severe or worsening symptoms, for
   warning signs that were not ruled out, and for higher-risk patients (infants, older adults,

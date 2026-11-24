@@ -1,3 +1,4 @@
+from coordinator_agent.graph import record_signs
 from coordinator_agent.intake import (
     CaseUpdate,
     briefing,
@@ -107,3 +108,17 @@ def test_stock_phrases_are_dropped_from_acknowledgements() -> None:
     assert natural("Sounds tough, thank you for sharing.") == "Sounds tough."
     assert natural("Thanks for sharing that!") == ""
     assert natural("  A month of that sounds tiring. ") == "A month of that sounds tiring."
+
+
+def test_the_checklist_answer_is_recorded_by_rule() -> None:
+    offered = ["Blue lips", "Cannot finish a sentence"]
+
+    assert record_signs({}, "Yes", offered) == {
+        "warning_signs": "answered “Yes” to: Blue lips, Cannot finish a sentence"
+    }
+    assert record_signs({}, "blue lips, and I feel dizzy", offered) == {
+        "warning_signs": "Blue lips"
+    }
+    assert record_signs({"negatives": "no fever"}, "None of these", offered) == {
+        "negatives": "no fever; none of: Blue lips, Cannot finish a sentence"
+    }

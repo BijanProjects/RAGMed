@@ -8,6 +8,7 @@ from pydantic import SecretStr
 from coordinator_agent.app import CoordinatorSettings, create_coordinator_app, make_mailer
 from coordinator_agent.emergency import CRISIS_GUIDANCE, EMERGENCY_GUIDANCE
 from coordinator_agent.executor import AT_CAPACITY
+from coordinator_agent.graph import MAX_CONSULTS
 from coordinator_agent.intake import FINAL_QUESTION, MAX_QUESTIONS
 from coordinator_agent.mailer import RecordingMailer, SmtpMailer, code_email
 from coordinator_agent.reply import BOOKING_START, DISCLAIMER, GREETING, OUT_OF_SCOPE
@@ -56,6 +57,7 @@ class Chat:
         self.agent = RemoteAgent(BASE, transport=httpx.ASGITransport(app=app))
         self.context_id: str | None = None
         self.progress: list[str] = []
+        self.steps: list[tuple[str, str]] = []  # (agent, what it did)
 
     async def send(self, text: str = "", action: dict[str, Any] | None = None) -> Reply:
         data = {"action": action} if action else None
@@ -64,6 +66,7 @@ class Chat:
         assert isinstance(reply, Reply)
         self.context_id = reply.context_id
         self.progress = [e.text for e in events if isinstance(e, Progress)]
+        self.steps = [(e.agent, e.text) for e in events if isinstance(e, Progress)]
         return reply
 
     async def interview_to_report(self) -> Reply:
@@ -167,6 +170,97 @@ async def test_the_interview_stops_after_the_question_limit() -> None:
     assert reply.text == FINAL_QUESTION
 
 
+async def test_every_intake_turn_consults_the_diagnosis_agent_first() -> None:
+    chat = Chat()
+
+    await chat.send("I keep getting headaches on one side")
+    await chat.send("About a month")
+
+    first, second = chat.diagnosis.consults
+    assert first["complaint"] == "I keep getting headaches on one side"
+    assert first["leads"] == []
+    assert second["latest"] == "About a month"
+    assert second["leads"] == ["migraine"]  # the next search starts from the last leads
+    briefing = chat.interviewer.briefings[0]
+    assert "migraine (one-sided, recurring)" in briefing
+    assert "whether light or noise makes it worse" in briefing
+    assert "sudden, worst-ever headache" in briefing
+
+
+async def test_each_step_names_the_agent_doing_it() -> None:
+    chat = Chat()
+
+    await chat.send("I keep getting headaches on one side")
+
+    agents = [agent for agent, _ in chat.steps]
+    assert chat.steps[0] == ("Care Coordinator", "Reading your message")
+    assert agents.index("Knowledge base") < len(agents) - 1
+    assert chat.steps[-1] == ("Care Coordinator", "Asking next: it helps tell possibilities apart")
+
+
+async def test_the_intake_carries_on_when_a_consult_fails() -> None:
+    chat = Chat(diagnosis=FakeDiagnosis(consult=None))
+
+    reply = await chat.send("I keep getting headaches on one side")
+
+    assert reply.text == "How long have you had it?"
+    assert "none yet" in chat.interviewer.briefings[0]
+    assert any("knowledge base is unavailable" in p for p in chat.progress)
+
+
+async def test_consults_stop_at_their_limit() -> None:
+    chat = Chat(interviewer=FakeInterviewer(questions=[f"Q{n}?" for n in range(30)]))
+    await chat.send("headaches")
+    for _ in range(MAX_CONSULTS + 2):
+        await chat.send("an answer")
+
+    assert len(chat.diagnosis.consults) == MAX_CONSULTS
+
+
+async def test_a_question_can_let_the_patient_pick_several_answers() -> None:
+    options = ["Nausea", "Light hurts", "Nausea", "Blurred vision", *[f"S{n}" for n in range(8)]]
+    chat = Chat(interviewer=FakeInterviewer(choices=options))
+
+    reply = await chat.send("I keep getting headaches on one side")
+
+    assert data(reply)["multi_select"] is True
+    assert data(reply)["quick_replies"] == [
+        "Nausea", "Light hurts", "Blurred vision", "S0", "S1", "S2", "S3", "S4",
+    ]  # fmt: skip
+    assert data(await Chat().send("headaches"))["multi_select"] is False
+
+
+async def test_an_acknowledgement_leads_into_the_question() -> None:
+    chat = Chat(interviewer=FakeInterviewer(acknowledgement="A month of that sounds tiring."))
+    await chat.send("I keep getting headaches on one side")
+
+    reply = await chat.send("About a month")
+
+    assert reply.text == "A month of that sounds tiring. How bad is it, from 0 to 10?"
+
+
+async def test_the_report_carries_the_handoff_and_an_urgency_score() -> None:
+    chat = Chat()
+
+    report = await chat.interview_to_report()
+
+    payload = data(report)["report"]
+    assert payload["urgency_score"] == 4
+    assert payload["impression"].startswith("One-sided recurring headaches")
+    assert payload["open_questions"] == ["Neurological examination"]
+    assert "**Urgency score: 4 of 5**" in report.text
+    assert "Handoff note for your clinician" in report.text
+    assert "Possibilities considered during the intake: migraine" in chat.diagnosis.questions[0]
+    assert "Possible conditions: migraine" in chat.interviewer.handoffs[0]
+
+
+async def test_the_coordinator_can_raise_the_urgency_of_the_visit() -> None:
+    report = await Chat(interviewer=FakeInterviewer(score=2)).interview_to_report()
+
+    assert data(report)["report"]["urgency_score"] == 2
+    assert data(report)["offer"]["urgency"] == "urgent"
+
+
 async def test_a_complete_interview_produces_a_draft_report_and_an_offer() -> None:
     chat = Chat()
 
@@ -186,7 +280,7 @@ async def test_a_complete_interview_produces_a_draft_report_and_an_offer() -> No
     }
     assert "Other notes" not in payload["report"]["case"]  # "no, that's everything" is not a note
     assert "Main problem: I keep getting headaches on one side" in chat.diagnosis.questions[0]
-    assert "Preparing your draft report" in chat.progress
+    assert any(p.startswith("Preparing your draft report") for p in chat.progress)
 
 
 async def test_a_real_answer_to_the_open_question_goes_into_the_report() -> None:

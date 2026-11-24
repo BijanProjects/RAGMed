@@ -3,7 +3,7 @@
     screen ─ red flag ─────────────────────────────────────────────▶ emergency
        └ dispatch ─ a button (show times, book) ─────────────────────▶ act
                   ├ intake under way ─▶ interview ─ more to ask ─────▶ (question)
-                  │                          └ enough ─▶ assess ─────▶ (draft report + offer)
+                  │                          └ enough ─▶ assess ─────▶ (report + handoff + offer)
                   └ route ─ symptoms or booking ─▶ interview
                           ├ general question ─▶ answer (Diagnosis agent, cited)
                           └ greeting / off-topic ─▶ canned
@@ -11,6 +11,11 @@
 
 Booking takes two steps: choosing a time emails a one-time code to the patient, and the visit is
 booked only once that code is entered (see verification.py).
+
+Each interview turn, the Coordinator first asks the Diagnosis agent for a consult (its working
+picture from the knowledge base), then decides the next question from it. At the end it writes a
+handoff for the clinician with an urgency score. Every step is reported with the agent doing it,
+so the web app can show the care team at work.
 
 Emergency screening runs on every message, including mid-interview. Conversation state is saved
 per thread (the A2A context id).
@@ -30,8 +35,11 @@ from coordinator_agent.intake import (
     FINAL_QUESTION,
     MAX_QUESTIONS,
     Interviewer,
+    briefing,
+    case_lines,
     case_summary,
     is_repeat,
+    lead_names,
     merge,
     quick_replies,
 )
@@ -64,17 +72,26 @@ from coordinator_agent.verification import (
 )
 from ragmed_a2a.client import AgentEvent, Progress
 from ragmed_a2a.client import Reply as AgentReply
-from ragmed_core.clinic import CLINICIAN_TYPES, GENERAL_PHYSICIAN
+from ragmed_core.clinic import (
+    CLINICIAN_TYPES,
+    COORDINATOR_AGENT,
+    DIAGNOSIS_AGENT,
+    GENERAL_PHYSICIAN,
+    SCHEDULING_AGENT,
+)
 from ragmed_core.ratelimit import MemoryRateLimiter, RateLimiter
 
 HISTORY_TURNS = 6
+MAX_CONSULTS = 6  # knowledge-base consults per intake; each costs one small-model call
 HISTORY_CHARS = 600
 UNAVAILABLE = "I could not get an answer just now. Please try again in a moment."
 NO_REPORT = "There is no report to book a visit for yet. Tell me what's bothering you first."
 
 
 class Diagnosis(Protocol):
-    def stream(self, text: str) -> AsyncIterator[AgentEvent]: ...
+    def stream(
+        self, text: str, *, data: dict[str, Any] | None = None
+    ) -> AsyncIterator[AgentEvent]: ...
 
 
 class Turn(TypedDict):
@@ -94,7 +111,10 @@ class State(TypedDict, total=False):
     case: dict[str, str]
     interview: list[Turn]
     questions: int
+    asked: list[str]  # the questions alone, without acknowledgements
     asked_final: bool
+    consult: dict[str, Any] | None  # the Diagnosis agent's latest working picture
+    consults: int
     report: dict[str, Any] | None
     offer: dict[str, Any] | None
     pending: Pending | None  # a booking waiting for its email code
@@ -108,12 +128,18 @@ def history_text(turns: list[Turn], limit: int = HISTORY_TURNS) -> str:
     return "\n".join(f"{t['role']}: {t['text'][:HISTORY_CHARS]}" for t in turns[-limit:])
 
 
-async def _ask_diagnosis(diagnosis: Diagnosis, text: str) -> AgentReply | None:
-    write = get_stream_writer()
+def step(text: str, agent: str = COORDINATOR_AGENT) -> None:
+    """Report what one member of the care team is doing (streamed to the web app)."""
+    get_stream_writer()({"progress": text, "agent": agent})
+
+
+async def _ask_diagnosis(
+    diagnosis: Diagnosis, text: str, data: dict[str, Any] | None = None
+) -> AgentReply | None:
     final: AgentReply | None = None
-    async for event in diagnosis.stream(text):
+    async for event in diagnosis.stream(text, data=data):
         if isinstance(event, Progress):
-            write({"progress": event.text})
+            step(event.text, event.agent or DIAGNOSIS_AGENT)
         else:
             final = event
     return final
@@ -174,6 +200,21 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             return "remember"
         return "answer" if state["intent"] == "medical_question" else "canned"
 
+    async def consult(known: dict[str, str], latest: str, previous: Any) -> dict[str, Any] | None:
+        """The Diagnosis agent's working picture of the case so far, or None if unavailable."""
+        step("Asking the Diagnosis agent what the knowledge base suggests")
+        request = {
+            "case": case_lines(known)[:4000],
+            "complaint": known["main_problem"][:2000],
+            "latest": latest[:2000],
+            "leads": lead_names(previous),
+        }
+        final = await _ask_diagnosis(diagnosis, "Intake consult", {"consult": request})
+        if final and final.state == "completed" and final.data:
+            return final.data[0]
+        step("The knowledge base is unavailable; continuing with a careful general intake")
+        return None
+
     async def interview(state: State) -> State:
         said: Turn = {"role": "patient", "text": state["message"]}
         transcript: list[Turn] = [*state.get("interview", []), said]
@@ -181,14 +222,21 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         known = dict(state.get("case", {}))
         if not known.get("main_problem"):  # the patient's own first words, never our question
             known["main_problem"] = next(t["text"] for t in transcript if t["role"] == "patient")
-        turn = await interviewer.next_turn(known, history_text(transcript, 40))
+        picture, consults = state.get("consult"), state.get("consults", 0)
+        if not state.get("asked_final") and consults < MAX_CONSULTS:
+            picture, consults = (
+                await consult(known, state["message"], picture) or picture,
+                consults + 1,
+            )
+        turn = await interviewer.next_turn(known, history_text(transcript, 40), briefing(picture))
         case = merge(known, turn.updates)
+        progress: State = {"case": case, "consult": picture, "consults": consults}
         if state.get("asked_final"):
             if not _nothing_more(state["message"]):
                 case["other_notes"] = state["message"]
-            return {"case": case, "interview": transcript, "phase": "assessing"}
+            return {**progress, "interview": transcript, "phase": "assessing"}
 
-        asked = [t["text"] for t in transcript if t["role"] == "assistant"]
+        asked = state.get("asked", [])
         done = (
             turn.complete
             or not turn.next_question.strip()
@@ -196,13 +244,25 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             or is_repeat(turn.next_question, asked)  # a third try at the same question
         )
         if done:  # always end with the open question
+            step("I have what the clinician needs; one last open question")
             question, replies, asked_final = FINAL_QUESTION, ["No, that's everything"], True
+            multi = False
         else:
             question, replies, asked_final = turn.next_question.strip(), turn.quick_replies, False
-        reply = Reply(kind="question", text=question, quick_replies=quick_replies(replies))
+            multi = turn.multi_select and len(replies) > 1
+            step(f"Asking next: {turn.reason.strip() or 'to fill in the picture'}")
+        acknowledgement = turn.acknowledgement.strip()
+        text = f"{acknowledgement} {question}" if acknowledgement else question
+        reply = Reply(
+            kind="question",
+            text=text,
+            quick_replies=quick_replies(replies, multi),
+            multi_select=multi,
+        )
         return {
-            "case": case,
-            "interview": [*transcript, {"role": "assistant", "text": question}],
+            **progress,
+            "interview": [*transcript, {"role": "assistant", "text": text}],
+            "asked": [*asked, question],
             "questions": questions + 1,
             "asked_final": asked_final,
             "reply": reply.model_dump(),
@@ -212,12 +272,21 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         return "assess" if state.get("phase") == "assessing" else "remember"
 
     async def assess(state: State) -> State:
-        get_stream_writer()({"progress": "Preparing your draft report"})
-        final = await _ask_diagnosis(diagnosis, case_summary(state["case"]))
+        step("Preparing your draft report: asking the Diagnosis agent for a full assessment")
+        picture = state.get("consult")
+        final = await _ask_diagnosis(diagnosis, case_summary(state["case"], lead_names(picture)))
         if not (final and final.state == "completed" and final.data):
             text = (final.text if final and final.text else UNAVAILABLE) + f"\n\n_{DISCLAIMER}_"
             return {"phase": "intake", "reply": Reply(kind="no_answer", text=text).model_dump()}
-        report = build_report(state["case"], final.data[0])
+        data = final.data[0]
+        step("Writing the handoff note and urgency score for your clinician")
+        assessment = (
+            f"{data.get('answer', '')}\nPossible conditions: "
+            f"{', '.join(data.get('possible_conditions', [])) or 'none named'}\n"
+            f"Urgency from the evidence: {data.get('urgency', 'routine')}"
+        )
+        handoff = await interviewer.handoff(state["case"], briefing(picture), assessment)
+        report = build_report(state["case"], data, handoff.model_dump())
         reply = report_reply(report, EMERGENCY_GUIDANCE)
         offer = reply.offer.model_dump() if reply.offer else None
         return {"phase": "report", "report": report, "offer": offer, "reply": reply.model_dump()}
@@ -239,6 +308,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
                 case "confirm":
                     return await _confirm(state, offer, str(action.get("code", "")).strip())
                 case _:
+                    step(f"Looking for open times with {kind}", SCHEDULING_AGENT)
                     slots = await scheduling.find_slots(kind, int(offer["visit_minutes"]))
         except SchedulingError as error:
             return {"reply": Reply(kind="no_answer", text=str(error)).model_dump()}
@@ -333,6 +403,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         state: State, offer: dict[str, Any], *, kind: str, start: str, name: str, email: str
     ) -> State:
         report = {**(state.get("report") or {}), "clinician_type": kind}
+        step("Booking your visit and sending your report to the clinician", SCHEDULING_AGENT)
         booked = await scheduling.book(
             clinician_type=kind,
             visit_minutes=int(offer["visit_minutes"]),
@@ -411,7 +482,10 @@ def _new_intake() -> State:
         "case": {},
         "interview": [],
         "questions": 0,
+        "asked": [],
         "asked_final": False,
+        "consult": None,
+        "consults": 0,
         "report": None,
         "offer": None,
         "pending": None,

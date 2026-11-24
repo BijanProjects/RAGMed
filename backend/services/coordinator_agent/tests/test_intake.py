@@ -1,13 +1,14 @@
 from coordinator_agent.intake import (
     CaseUpdate,
+    briefing,
     case_lines,
     is_repeat,
     is_straightforward_request,
     merge,
     quick_replies,
 )
-from coordinator_agent.reply import build_report
-from coordinator_agent.testing import ANSWER
+from coordinator_agent.reply import build_report, triage
+from coordinator_agent.testing import ANSWER, CONSULT
 
 
 def test_merge_appends_new_facts_and_skips_non_answers() -> None:
@@ -79,3 +80,23 @@ def test_a_disclaimer_copied_into_the_assessment_is_removed() -> None:
     report = build_report({"main_problem": "rash"}, {**ANSWER, "answer": answer})
 
     assert report["assessment"] == "Measles fits [1]."
+
+
+def test_the_coordinator_may_raise_the_urgency_but_never_lower_it() -> None:
+    assert triage("routine", None) == (4, "routine")
+    assert triage("routine", 3) == (3, "routine")
+    assert triage("routine", 2) == (2, "urgent")
+    assert triage("urgent", 5) == (2, "urgent")  # the evidence says today: it stays today
+    assert triage("emergency", 4) == (1, "emergency")
+    assert triage("self_care", 3) == (3, "routine")
+    assert triage("routine", 0) == (4, "routine")  # a malformed score is ignored
+
+
+def test_the_briefing_reads_the_working_picture() -> None:
+    text = briefing(CONSULT)
+
+    assert "Considering: migraine (one-sided, recurring)" in text
+    assert "Working urgency: routine" in text
+    assert "change little: no" in text
+    assert "none yet" in briefing(None)
+    assert "nothing specific yet" in briefing({**CONSULT, "leads": []})

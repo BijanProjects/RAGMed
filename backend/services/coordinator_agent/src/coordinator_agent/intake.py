@@ -1,8 +1,13 @@
-"""The intake interview: one adaptive question at a time, like a nurse before a visit."""
+"""The intake: a triage coordinator who asks only what matters, then hands over to the clinician.
+
+Each turn, the Diagnosis agent's working picture (from the knowledge base) says what is being
+considered, what would tell those possibilities apart, and which warning signs to check. The
+coordinator uses it to choose the one question worth asking next, or to stop.
+"""
 
 from collections.abc import Mapping, Sequence
 from difflib import SequenceMatcher
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
@@ -11,6 +16,7 @@ from ragmed_llm import ask_structured
 
 MAX_QUESTIONS = 10
 MAX_REPLIES = 4
+MAX_CHOICES = 8  # options for a question where several answers can apply
 MAX_REPLY_CHARS = 40
 FINAL_QUESTION = (
     "Is there anything else you would like the clinician to know, such as worries, other "
@@ -28,6 +34,7 @@ CaseField = Literal[
     "worse_with",
     "better_with",
     "other_symptoms",
+    "negatives",
     "age",
     "sex",
     "pregnancy",
@@ -50,6 +57,7 @@ LABELS: dict[str, str] = {
     "worse_with": "Worse with",
     "better_with": "Better with",
     "other_symptoms": "Other symptoms",
+    "negatives": "Does not have",
     "age": "Age",
     "sex": "Sex",
     "pregnancy": "Pregnancy",
@@ -61,24 +69,66 @@ LABELS: dict[str, str] = {
     "other_notes": "Other notes",
 }
 
-INTERVIEW = """You are the intake assistant at RAGMed Clinic. Before a visit, you gather what the
-clinician needs, the way a nurse would. You do NOT diagnose or advise during intake.
+INTERVIEW = """You are the Care Coordinator at RAGMed Clinic: the experienced person who talks
+with each patient before their visit, decides what the clinician needs to know, and hands the
+case over. You work with the Diagnosis agent, which searches the clinic's medical knowledge base
+as you talk; its latest working picture is below. You do not diagnose or advise during intake.
 
-Ask ONE short, clear question at a time, in plain language, adapted to the person's problem.
-Over the interview, cover what is relevant: the main problem; when it started and how long it
-has lasted; where it is; what it feels like; how severe it is from 0 to 10; whether it comes and
-goes; what makes it worse or better; other symptoms; age; sex, and pregnancy only if relevant;
-existing conditions; medications; allergies; relevant exposures or travel. For a prescription
-renewal or a note, ask only what that needs. Skip anything already answered or irrelevant:
-the person's first message is their main problem, so never ask for it again, and read it for
-details they already gave (for example "for two days" answers when it started).
-Never repeat a question from "Questions already asked". If an answer did not address your
-question, you may rephrase it once; after that, move on to something else.
+Deciding what to ask
+- Ask only what would change the picture: something that tells the leading possibilities
+  apart, rules a warning sign in or out, or settles how urgent this is or who should see them.
+  If no answer would change anything, do not ask it.
+- Lean on the working picture: its "would help to know" and "warning signs" lists are your best
+  next questions. If the working urgency is urgent or emergency, check the warning signs first
+  and keep everything else short. Ask about warning signs plainly, without naming frightening
+  conditions.
+- Read everything the person has said. Never ask for something they already told you, even in
+  passing ("for two days" says when it started). Their first message is their main problem.
+- Background (age, medicines, conditions, allergies, pregnancy) only when it matters for this
+  problem. Age usually does, for urgency and for children; medicines matter for renewals, side
+  effects and bleeding. Two short, related questions may share a turn ("How old are you, and do
+  you take any regular medicines?").
+- For a prescription renewal or a note, ask only what that needs.
+- Never repeat a question from "Questions already asked". If an answer missed your question,
+  rephrase it once at most, then move on.
 
-From the person's latest answer, record every fact you learned in `updates` (one field each,
-in their words, short). Set `complete` to true when a clinician would have enough for a
-pre-visit note, usually after 4 to 8 questions; then leave `next_question` empty. Offer up to 4
-short `quick_replies` when natural (for example "Yes", "No", "Less than a day")."""
+How to talk
+- Sound like a warm, competent person, not a form. In `acknowledgement`, when it fits, react
+  briefly and specifically to what they just said ("A month of that sounds exhausting.", "Good,
+  that helps."). Vary it, keep it to one short sentence, leave it empty when a plain question
+  is better, and never write "Thank you for sharing".
+- `next_question`: one clear question in plain words. No jargon, no lists.
+- `reason`: in under 15 plain words the patient could read, why this question matters (for
+  example "it helps tell two kinds of headache apart"). Never name a serious condition.
+
+When to stop
+Set `complete` to true once the clinician would have enough to see this person well: the main
+problem is clear, the warning signs are checked, the urgency is settled, and more questions
+would not change who should see them or how soon. That is often 3 to 6 questions; a simple
+request may need 1 or 2. Then leave `next_question` and `reason` empty.
+
+Record every fact from the person's latest answer in `updates` (one field each, short, in their
+words), including what they say they do NOT have, under `negatives`. Offer up to 4 short
+`quick_replies` when natural (for example "Yes", "No", "Less than a day").
+
+When several answers could apply at once (other symptoms, medicines, existing conditions,
+allergies, triggers), set `multi_select` to true and offer up to 8 short options the person can
+tick, chosen for this problem: for symptoms, the ones that would tell the leads apart or that
+are warning signs. Do not include "None" or "Other"; the screen adds those, and the person can
+always type their own answer."""
+
+HANDOFF = """You are the Care Coordinator at RAGMed Clinic, handing a patient over to the
+clinician who will see them. From the intake, the working picture and the Diagnosis agent's
+assessment, write:
+
+- impression: 2 or 3 sentences for the clinician: the presenting problem and its key features,
+  the important negatives, and the possibilities the assessment raised. Not a diagnosis.
+- urgency_score from 1 to 5: 1 emergency, now; 2 today; 3 within a few days; 4 routine, within a
+  week or two; 5 self-care is likely enough. Move it up for severe or worsening symptoms, for
+  warning signs that were not ruled out, and for higher-risk patients (infants, older adults,
+  pregnancy, serious existing conditions).
+- score_reason: one sentence, in plain words the patient can read too.
+- open_questions: up to 3 things the clinician should still ask or examine."""
 
 
 class CaseUpdate(BaseModel):
@@ -89,19 +139,41 @@ class CaseUpdate(BaseModel):
 class IntakeTurn(BaseModel):
     updates: list[CaseUpdate]
     complete: bool
+    acknowledgement: str = Field(
+        default="", description="One short, specific reaction to their answer; may be empty."
+    )
     next_question: str = Field(description="The one question to ask next; empty if complete.")
-    quick_replies: list[str] = Field(description="Up to 4 short suggested answers.")
+    reason: str = Field(default="", description="Why this question matters, in plain words.")
+    quick_replies: list[str] = Field(
+        description="Up to 4 short suggested answers, or up to 8 options if multi_select."
+    )
+    multi_select: bool = Field(
+        default=False, description="True if the person may pick several of the options."
+    )
+
+
+class Handoff(BaseModel):
+    impression: str = Field(description="2 or 3 sentences for the clinician.")
+    urgency_score: int = Field(description="1 (emergency, now) to 5 (self-care likely enough).")
+    score_reason: str = Field(description="One plain sentence: why this score.")
+    open_questions: list[str] = Field(description="Up to 3 things still to ask or examine.")
 
 
 class Interviewer(Protocol):
-    async def next_turn(self, case: Mapping[str, str], transcript: str) -> IntakeTurn: ...
+    async def next_turn(
+        self, case: Mapping[str, str], transcript: str, briefing: str = ""
+    ) -> IntakeTurn: ...
+
+    async def handoff(self, case: Mapping[str, str], briefing: str, assessment: str) -> Handoff: ...
 
 
 class LlmInterviewer:
     def __init__(self, models: Sequence[BaseChatModel]) -> None:
         self._models = list(models)
 
-    async def next_turn(self, case: Mapping[str, str], transcript: str) -> IntakeTurn:
+    async def next_turn(
+        self, case: Mapping[str, str], transcript: str, briefing: str = ""
+    ) -> IntakeTurn:
         known = case_lines(case) or "(nothing yet)"
         asked = [
             line[len("assistant: ") :]
@@ -110,10 +182,46 @@ class LlmInterviewer:
         ]
         asked_text = "\n".join(f"- {q}" for q in asked) or "(none)"
         user = (
-            f"Known so far:\n{known}\n\nQuestions already asked:\n{asked_text}\n\n"
-            f"Interview so far:\n{transcript}"
+            f"{briefing or NO_PICTURE}\n\nKnown so far:\n{known}\n\n"
+            f"Questions already asked:\n{asked_text}\n\nInterview so far:\n{transcript}"
         )
         return await ask_structured(self._models, IntakeTurn, INTERVIEW, user)
+
+    async def handoff(self, case: Mapping[str, str], briefing: str, assessment: str) -> Handoff:
+        user = (
+            f"Intake:\n{case_lines(case)}\n\n{briefing or NO_PICTURE}\n\n"
+            f"Diagnosis agent's assessment:\n{assessment}"
+        )
+        return await ask_structured(self._models, Handoff, HANDOFF, user)
+
+
+NO_PICTURE = "Working picture: none yet (the knowledge base has not been searched)."
+
+
+def briefing(consult: Mapping[str, Any] | None) -> str:
+    """The Diagnosis agent's working picture, as the coordinator reads it."""
+    if not consult:
+        return NO_PICTURE
+    leads = consult.get("leads") or []
+    lines = ["Working picture from the Diagnosis agent (knowledge base; not a diagnosis):"]
+    lines.append(
+        "- Considering: "
+        + ("; ".join(f"{lead['condition']} ({lead.get('fits', '')})" for lead in leads)
+           if leads else "nothing specific yet")
+    )  # fmt: skip
+    if consult.get("ask_next"):
+        lines.append("- Would help to know: " + "; ".join(consult["ask_next"]))
+    if consult.get("warning_signs"):
+        lines.append("- Warning signs to check: " + "; ".join(consult["warning_signs"]))
+    lines.append(f"- Working urgency: {consult.get('urgency', 'routine')}")
+    lines.append(
+        f"- More questions would change little: {'yes' if consult.get('enough') else 'no'}"
+    )
+    return "\n".join(lines)
+
+
+def lead_names(consult: Mapping[str, Any] | None) -> list[str]:
+    return [str(lead["condition"]) for lead in (consult or {}).get("leads", [])]
 
 
 NON_ANSWERS = {
@@ -146,11 +254,13 @@ def case_lines(case: Mapping[str, str]) -> str:
     return "\n".join(f"- {LABELS[k]}: {v}" for k, v in case.items() if k in LABELS and v)
 
 
-def case_summary(case: Mapping[str, str]) -> str:
-    """The case as text for the Diagnosis agent."""
+def case_summary(case: Mapping[str, str], considered: Sequence[str] = ()) -> str:
+    """The case as text for the Diagnosis agent, with the leads its consults raised."""
+    leads = f"Possibilities considered during the intake: {', '.join(considered)}\n\n"
     return (
         "Patient-reported information gathered before a clinic visit (not verified):\n"
         f"{case_lines(case)}\n\n"
+        f"{leads if considered else ''}"
         "Using only the passages, describe which conditions could fit this presentation and how "
         "urgent it is. Prefer common conditions over rare ones unless the details point to a "
         "rare one. Then choose the visit:\n"
@@ -163,9 +273,10 @@ def case_summary(case: Mapping[str, str]) -> str:
     )
 
 
-def quick_replies(replies: Sequence[str]) -> list[str]:
+def quick_replies(replies: Sequence[str], multi_select: bool = False) -> list[str]:
     cleaned = [r.strip() for r in replies if r.strip() and len(r.strip()) <= MAX_REPLY_CHARS]
-    return cleaned[:MAX_REPLIES]
+    unique = list(dict.fromkeys(cleaned))
+    return unique[: MAX_CHOICES if multi_select else MAX_REPLIES]
 
 
 def _normal(question: str) -> str:

@@ -6,12 +6,12 @@ import structlog
 from a2a.helpers import get_data_parts, new_data_part, new_text_part
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import TaskState
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from coordinator_agent.limits import Limits, client_ip, message_limit
-from ragmed_a2a.server import start_task
+from ragmed_a2a.server import report_progress, start_task
+from ragmed_core.clinic import COORDINATOR_AGENT
 from ragmed_core.ratelimit import MemoryRateLimiter, RateLimiter
 from ragmed_llm import AtCapacityError
 
@@ -66,7 +66,8 @@ class CoordinatorExecutor(AgentExecutor):
             await updater.reject(updater.new_agent_message([new_text_part(refusal)]))
             return
 
-        await updater.start_work(updater.new_agent_message([new_text_part(ROUTING)]))
+        await updater.start_work()
+        await report_progress(updater, ROUTING, COORDINATOR_AGENT)
         # One saved conversation per A2A context, so follow-up questions have their history.
         config: RunnableConfig = {"configurable": {"thread_id": str(context.context_id)}}
         reply: dict[str, Any] | None = None
@@ -81,8 +82,8 @@ class CoordinatorExecutor(AgentExecutor):
                 # With several stream modes, each event is a (mode, payload) pair.
                 mode, data = cast(tuple[str, dict[str, Any]], event)
                 if mode == "custom" and "progress" in data:
-                    step = updater.new_agent_message([new_text_part(data["progress"])])
-                    await updater.update_status(TaskState.TASK_STATE_WORKING, step)
+                    agent = str(data.get("agent") or COORDINATOR_AGENT)
+                    await report_progress(updater, data["progress"], agent)
                 elif mode == "updates":
                     for values in data.values():
                         if values and "reply" in values:

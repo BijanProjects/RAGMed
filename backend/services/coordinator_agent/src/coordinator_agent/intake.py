@@ -213,11 +213,14 @@ Respond to their latest message the way a calm, caring person on an emergency li
 
 - Answer what they actually said. For example, if no doctor is available: emergency
   departments and emergency services need no appointment and are open day and night, and an
-  emergency number can send help to them.
-- Only general safety steps anyone can follow while help comes (for example: call now, do not
-  drive yourself, stay with someone or unlock the door, sit up if breathing is hard, keep the
-  phone on). Never name a medicine or a dose; at most, "use the rescue medicine your clinician
-  prescribed for this, as you were told".
+  emergency number can send help to them. If they are somewhere remote: emergency numbers work
+  wherever there is any phone signal, many phones can send an emergency SOS by satellite with
+  none, and anyone nearby should be asked to help get them to the nearest hospital.
+- Only general safety steps anyone can follow while help comes, fitted to the symptoms in the
+  conversation, never advice for symptoms they did not mention (for example: call now, do not
+  drive yourself, stay with someone or unlock the door, sit or lie somewhere safe and cool,
+  keep the phone on). Never name a medicine or a dose; at most, "use the rescue medicine
+  your clinician prescribed for this, as you were told".
 - Plain words, under 90 words, no headings or lists.
 
 Write the first line as exactly RESUME if they clearly say the symptoms are not happening now,
@@ -423,21 +426,51 @@ _STOPWORDS = {
 }  # fmt: skip
 
 
-def classify_checklist(answer: str, offered: Sequence[str]) -> tuple[str, list[str]]:
+MIN_WORD = 4  # shorter words ("or", "the", "new") rarely name one sign
+
+
+def _words(text: str) -> set[str]:
+    return {w.strip(".,;:!?()'\"") for w in text.casefold().split()} - {""}
+
+
+def signs_named(text: str, offered: Sequence[str], topic: str = "") -> list[str]:
+    """The offered signs that `text` names: by their wording, or by a distinctive word.
+
+    A word counts only if it is long enough, not a common word, not shared with another
+    option, and not part of the `topic`, the patient's main problem ("headache" names no
+    headache sign when the problem is headaches).
+    """
+    about = {w[:5] for w in _words(topic) if len(w) >= MIN_WORD}
+    lowered = text.casefold()
+    counts: dict[str, int] = {}
+    for sign in offered:
+        for word in _words(sign):
+            counts[word] = counts.get(word, 0) + 1
+    said = _words(text)
+    return [
+        sign
+        for sign in offered
+        if sign.casefold().strip() in lowered
+        or any(
+            len(w) >= MIN_WORD
+            and w not in _STOPWORDS
+            and counts[w] == 1
+            and w[:5] not in about
+            and any(s.startswith(w[:5]) for s in said)
+            for w in _words(sign)
+        )
+    ]
+
+
+def classify_checklist(
+    answer: str, offered: Sequence[str], topic: str = ""
+) -> tuple[str, list[str]]:
     """How an answer to the warning-sign checklist reads: ("none" | "named" | "yes" |
     "unclear", the signs named). A sign counts as named when the answer shares one of its
     distinctive words ("short of breath" names "Shortness of breath")."""
     if is_none(answer):
         return "none", []
-    said = {w.strip(".,;!?") for w in answer.casefold().split()}
-    named = [
-        sign
-        for sign in offered
-        if any(
-            len(w) >= 4 and w not in _STOPWORDS and any(s.startswith(w[:5]) for s in said)  # noqa: PLR2004
-            for w in (word.strip(".,;()") for word in sign.casefold().split())
-        )
-    ]
+    named = signs_named(answer, offered, topic)
     if named:
         return "named", named
     bare = answer.casefold().strip(" .!")

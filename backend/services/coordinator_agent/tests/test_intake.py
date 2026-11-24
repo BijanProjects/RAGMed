@@ -10,6 +10,7 @@ from coordinator_agent.intake import (
     merge,
     natural,
     quick_replies,
+    signs_named,
 )
 from coordinator_agent.reply import build_report, triage
 from coordinator_agent.testing import ANSWER, CONSULT
@@ -144,3 +145,26 @@ def test_the_checklist_question_names_who_it_is_about() -> None:
     )
     assert "has your child" in checklist_question({"main_problem": "My son has a cough"})
     assert "have they" in checklist_question({"main_problem": "my mom fell"}, again=True)
+
+
+def test_a_word_shared_by_every_option_names_none_of_them() -> None:
+    offered = [
+        "sudden severe headache",
+        "headache with fever or stiff neck",
+        "headache with confusion or loss of consciousness",
+    ]
+
+    assert (
+        signs_named("headache with fever or stiff neck, headache with confusion", offered)
+        == (offered[1:])
+    )
+    assert signs_named("I had a stiff neck and felt confused", offered) == offered[1:]
+    assert signs_named("my headache is bad", offered) == []
+
+
+def test_the_patients_own_complaint_names_no_warning_sign() -> None:
+    offered = ["Sudden, severe headache", "Stiff neck", "Fever or confusion"]
+    answer = "headache with fever or stiff neck, headache with confusion"
+
+    assert signs_named(answer, offered, topic="headaches on one side") == offered[1:]
+    assert signs_named(answer, offered) == offered  # without the topic, "headache" would count

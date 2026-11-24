@@ -124,6 +124,7 @@ async def test_a_red_flag_mid_interview_is_escalated_and_the_interview_resumes()
     assert data(alarm)["quick_replies"] == ["I've called for help", "It's not happening right now"]
     assert data(resumed)["kind"] == "question"
     assert resumed.text.endswith("Let's carry on. How long have you had it?")
+    assert data(resumed)["quick_replies"] == ["A day", "A week"]  # asked again with its options
     assert data(await chat.send("About a month"))["kind"] == "question"
 
 
@@ -172,6 +173,21 @@ async def test_the_coordinators_own_reply_streams_as_it_is_written() -> None:
     assert "".join(d.text for d in chat.drafts) == (
         "Emergency departments need no appointment. Call now."
     )
+
+
+async def test_signs_ticked_in_an_emergency_lead_to_an_urgent_report_once_it_passes() -> None:
+    chat = Chat(diagnosis=FakeDiagnosis(consult={**WITH_SIGNS, "warning_signs": ["Stiff neck"]}))
+    await chat.send("I keep getting headaches on one side")
+    await chat.send("About a month")  # then the checklist
+
+    alarm = await chat.send("Stiff neck, and a fever")  # the screen catches fever + stiff neck
+    report = await chat.send("It's not happening right now")
+
+    assert data(alarm)["kind"] == "emergency"
+    payload = data(report)
+    assert payload["kind"] == "report"  # no checklist again, no more questions
+    assert payload["urgency"] == "urgent"
+    assert payload["report"]["case"]["Warning signs reported"] == "Stiff neck"
 
 
 async def test_after_an_emergency_the_coordinator_stays_and_answers() -> None:
@@ -345,6 +361,19 @@ async def test_the_checklist_is_worded_for_a_child_and_never_shown_without_optio
 
     assert check.text == "Before we go on, has your child had any of these?"
     assert len(data(check)["quick_replies"]) == 2
+
+
+async def test_a_warning_sign_question_from_the_model_becomes_the_checklist() -> None:
+    asking = "Have you had a sudden, worst-ever headache, or fever with a stiff neck?"
+    chat = Chat(
+        interviewer=FakeInterviewer(questions=[asking, "How bad is it?"]),
+        diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)),
+    )
+
+    first = await chat.send("Headaches on one side")
+
+    assert first.text == "Before we go on, have you had any of these?"
+    assert data(first)["multi_select"] is True
 
 
 async def test_an_urgent_picture_checks_warning_signs_at_once() -> None:

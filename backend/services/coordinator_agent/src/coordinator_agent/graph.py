@@ -48,6 +48,7 @@ from coordinator_agent.intake import (
     merge,
     natural,
     quick_replies,
+    signs_named,
 )
 from coordinator_agent.limits import Limits, booking_limit
 from coordinator_agent.mailer import ConsoleMailer, Mailer, MailError
@@ -121,6 +122,7 @@ class State(TypedDict, total=False):
     signs_offered: list[str]  # the warning signs on the checklist
     signs_reasked: bool  # the checklist was asked again after an unclear answer
     signs_present: str  # the warning signs the patient reported
+    last_ask: dict[str, Any] | None  # the last question, with its options, to ask again
     case: dict[str, str]
     interview: list[Turn]
     questions: int
@@ -197,6 +199,9 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         phase = state.get("phase") or "chat"
         before = (state.get("alert") or {}).get("before", phase) if phase == "emergency" else phase
         alert = {"category": flag.category, "guidance": flag.guidance, "before": before}
+        asked = state.get("asked", [])
+        if phase == "intake" and asked and asked[-1] == WARNING_CHECK:
+            alert["signs"] = state.get("message", "")[:500]  # a checklist answer: keep it
         return {"intent": "emergency", "phase": "emergency", "alert": alert, **said(reply)}
 
     def dispatch(state: State) -> str:
@@ -218,9 +223,28 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         answer = await interviewer.support(alert["category"], history_text(turns, 8), draft)
         if answer.resume:
             phase = alert["before"] if alert["before"] in ("intake", "chat", "report") else "chat"
-            asked = state.get("asked", [])
-            again = f"\n\nLet's carry on. {asked[-1]}" if phase == "intake" and asked else ""
-            reply = Reply(kind="question", text=f"{natural(answer.reply)}{again}")
+            if phase == "intake" and alert.get("signs"):
+                # They ticked warning signs: no more questions, an urgent report now.
+                case = record_signs(
+                    state.get("case", {}), alert["signs"], state.get("signs_offered", [])
+                )
+                step("You reported warning signs: preparing an urgent report now")
+                return {
+                    "phase": "assessing",
+                    "alert": None,
+                    "case": case,
+                    "signs_present": case.get("warning_signs", alert["signs"]),
+                }
+            last = state.get("last_ask") if phase == "intake" else None
+            text = natural(answer.reply)
+            if last:  # ask the last question again, with its options
+                text = f"{text}\n\nLet's carry on. {last['text']}"
+            reply = Reply(
+                kind="question",
+                text=text,
+                quick_replies=(last or {}).get("quick_replies", []),
+                multi_select=bool((last or {}).get("multi_select")),
+            )
             return {"phase": phase, "alert": None, **said(reply)}
         step("Staying with you: the emergency comes first")
         guidance = alert.get("guidance") or EMERGENCY_GUIDANCE
@@ -326,7 +350,8 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         turn = await interviewer.next_turn(known, history_text(transcript, 40), briefing(picture))
         checklist = bool(asked) and asked[-1] == WARNING_CHECK
         offered = state.get("signs_offered", [])
-        reading = classify_checklist(state["message"], offered)[0] if checklist else ""
+        topic = known.get("main_problem", "")
+        reading = classify_checklist(state["message"], offered, topic)[0] if checklist else ""
         if reading == "unclear" and not state.get("signs_reasked"):
             # Not an answer to the checklist: record it as usual and ask the checklist once more.
             step("Your answer did not say which warning signs apply; asking once more")
@@ -345,6 +370,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
                 "interview": [*transcript, {"role": "assistant", "text": text}],
                 "asked": [*asked, WARNING_CHECK],
                 "signs_reasked": True,
+                "last_ask": {"text": text, "quick_replies": offered, "multi_select": True},
                 "reply": again.model_dump(),
             }
         # The checklist answer is recorded by rule, not by the model, which can misread a "Yes".
@@ -377,11 +403,14 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         signs = [str(s) for s in (picture or {}).get("warning_signs", []) if str(s).strip()]
         pressing = (picture or {}).get("urgency") in ("urgent", "emergency")
         shown_signs = quick_replies(signs, True)  # a checklist is never asked without options
+        # The model sometimes asks the warning signs itself, despite being told not to: the
+        # checklist (tick boxes, read by rule) takes its place.
+        asks_signs = len(signs_named(turn.next_question, shown_signs, topic)) >= 2  # noqa: PLR2004
         check_signs = (
             bool(shown_signs)
             and not state.get("signs_checked")
             and questions < MAX_QUESTIONS
-            and (questions >= 1 or done or pressing)  # after the first answer, never skipped
+            and (questions >= 1 or done or pressing or asks_signs)  # never skipped
         )
         if check_signs:
             step("Checking the warning signs the Diagnosis agent flagged")
@@ -406,6 +435,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         )
         return {
             **progress,
+            "last_ask": {"text": text, "quick_replies": reply.quick_replies, "multi_select": multi},
             "interview": [*transcript, {"role": "assistant", "text": text}],
             "asked": [*asked, question],
             "questions": questions + 1,
@@ -619,7 +649,8 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         "route", after_route, ["follow_up", "interview", "remember", "answer", "canned"]
     )
     graph.add_conditional_edges("interview", after_interview, ["assess", "remember"])
-    for name in ("assess", "act", "support", "follow_up", "answer", "canned"):
+    graph.add_conditional_edges("support", after_interview, ["assess", "remember"])
+    for name in ("assess", "act", "follow_up", "answer", "canned"):
         graph.add_edge(name, "remember")
     graph.add_edge("remember", END)
     return graph.compile(checkpointer=checkpointer)
@@ -629,7 +660,7 @@ def record_signs(case: dict[str, str], answer: str, offered: list[str]) -> dict[
     """The checklist answer, in the case: the signs reported, or that none of them were. An
     unclear answer is recorded as possibly any of them, to be safe."""
     listed = ", ".join(offered) or "the warning signs asked about"
-    reading, named = classify_checklist(answer, offered)
+    reading, named = classify_checklist(answer, offered, case.get("main_problem", ""))
     if reading == "none":
         previous = case.get("negatives")
         none = f"none of: {listed}"
@@ -656,6 +687,7 @@ def _new_intake() -> State:
         "asked_final": False,
         "signs_checked": False,
         "signs_present": "",
+        "last_ask": None,
         "signs_reasked": False,
         "alert": None,
         "consult": None,

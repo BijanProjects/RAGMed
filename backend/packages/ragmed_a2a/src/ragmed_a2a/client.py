@@ -29,9 +29,13 @@ _FINAL_STATES = {
 
 @dataclass(frozen=True, slots=True)
 class Progress:
-    """A status update while the other agent works, e.g. "Searching the knowledge base"."""
+    """A status update while the other agent works, e.g. "Searching the knowledge base".
+
+    `agent` names who is acting, when the other agent says (see `server.report_progress`).
+    """
 
     text: str
+    agent: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +99,7 @@ class RemoteAgent:
             context = update.get("context_id") or context
             task_id = update.get("task_id") or task_id
             if "progress" in update:
-                yield Progress(update["progress"])
+                yield Progress(update["progress"], update.get("agent", ""))
             reply_text.extend(update.get("text", []))
             reply_data.extend(update.get("data", []))
             state = update.get("state", state)
@@ -126,6 +130,9 @@ def _read(event: StreamResponse) -> dict[str, Any]:
                 update["text"] = [message_text]
         elif message_text:
             update["progress"] = message_text
+            for data in get_data_parts(status.message.parts):
+                if isinstance(data, dict) and isinstance(data.get("agent"), str):
+                    update["agent"] = data["agent"]
         return update
     if kind == "message":
         return {"text": get_text_parts(event.message.parts), "state": "completed"}

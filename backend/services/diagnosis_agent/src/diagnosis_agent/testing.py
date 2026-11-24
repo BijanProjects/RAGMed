@@ -2,7 +2,14 @@
 
 from dataclasses import dataclass, field
 
-from diagnosis_agent.schema import DiagnosisAnswer, GroundingCheck, Passage, SearchQuery
+from diagnosis_agent.schema import (
+    ConsultDraft,
+    DiagnosisAnswer,
+    GroundingCheck,
+    Lead,
+    Passage,
+    SearchQuery,
+)
 
 PASSAGES = [
     Passage(answer_id="a1", question="What causes asthma?", qtype="causes",
@@ -41,6 +48,18 @@ class FakeReasoner:
             visit_reason="Breathing problems need a specialist assessment.",
         )
     )
+    consult_given: ConsultDraft = field(
+        default_factory=lambda: ConsultDraft(
+            leads=[
+                Lead(condition="asthma", fits="wheeze at night", citations=[1, 2]),
+                Lead(condition="a guess", fits="no source", citations=[9]),
+            ],
+            ask_next=["whether exercise brings it on", " "],
+            warning_signs=["lips turning blue"],
+            urgency="routine",
+            enough=False,
+        )
+    )
     unsupported: list[str] = field(default_factory=list)
     condition: str = ""
     calls: list[str] = field(default_factory=list)
@@ -58,3 +77,7 @@ class FakeReasoner:
     async def check(self, answer: str, passages: str) -> GroundingCheck:
         self.calls.append("check")
         return GroundingCheck(unsupported=list(self.unsupported))
+
+    async def consult(self, case: str, passages: str) -> ConsultDraft:
+        self.calls.append("consult")
+        return self.consult_given

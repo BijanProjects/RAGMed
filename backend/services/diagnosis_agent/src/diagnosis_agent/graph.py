@@ -72,6 +72,17 @@ def number_passages(passages: list[Passage], only: set[int] | None = None) -> st
 
 
 _URGENCY_ORDER: list[Urgency] = ["self_care", "routine", "urgent", "emergency"]
+EXCERPT_CHARS = 1500
+
+
+def cite(number: int, passage: Passage) -> Citation:
+    """A source as readers see it: its title and the text that was read."""
+    return Citation(
+        number=number,
+        answer_id=passage.answer_id,
+        question=label(passage),
+        excerpt=passage.text[:EXCERPT_CHARS],
+    )
 
 
 def label(passage: Passage) -> str:
@@ -131,10 +142,7 @@ def finalise(draft: DiagnosisAnswer, passages: list[Passage], query: str) -> Dia
     numbers = sorted({n for n in draft.citations if 1 <= n <= len(passages)})
     return DiagnosisResult(
         answer=answer,
-        citations=[
-            Citation(number=n, answer_id=passages[n - 1].answer_id, question=label(passages[n - 1]))
-            for n in numbers
-        ],
+        citations=[cite(n, passages[n - 1]) for n in numbers],
         possible_conditions=draft.possible_conditions,
         urgency=draft.urgency,
         recommend_visit=draft.recommend_visit or draft.urgency in ("urgent", "emergency"),

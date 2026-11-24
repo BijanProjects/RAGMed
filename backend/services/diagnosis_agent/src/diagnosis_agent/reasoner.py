@@ -5,7 +5,7 @@ from typing import Protocol
 
 from langchain_core.language_models import BaseChatModel
 
-from diagnosis_agent.schema import DiagnosisAnswer, GroundingCheck, SearchQuery
+from diagnosis_agent.schema import ConsultDraft, DiagnosisAnswer, GroundingCheck, SearchQuery
 from ragmed_llm import ask_structured
 
 REWRITE = """Turn the patient's message into one self-contained search query for a medical
@@ -20,12 +20,28 @@ sentences that are supported, and never list advice to see a clinician or to see
 fact is supported, return an empty list."""
 
 
+CONSULT = """You support a clinic's triage coordinator while they talk with a patient. From the
+intake so far and the numbered passages from the clinic's medical knowledge base, give your
+working picture, using only what the passages say:
+
+- leads: the conditions the passages connect to this case, most likely first, each citing the
+  passages that describe it. Prefer common conditions unless the details point elsewhere.
+- ask_next: the facts not yet known that would best tell the leads apart or settle the urgency.
+  Never list something the intake already answers.
+- warning_signs: the signs that would make this urgent and that nobody has asked about yet.
+- urgency, from what is known so far, and whether more questions would change anything.
+
+This guides the questions; it is never shown to the patient as a diagnosis."""
+
+
 class Reasoner(Protocol):
     async def search_query(self, question: str, previous: str | None) -> SearchQuery: ...
 
     async def answer(self, instructions: str) -> DiagnosisAnswer: ...
 
     async def check(self, answer: str, passages: str) -> GroundingCheck: ...
+
+    async def consult(self, case: str, passages: str) -> ConsultDraft: ...
 
 
 class LlmReasoner:
@@ -55,3 +71,8 @@ class LlmReasoner:
     async def check(self, answer: str, passages: str) -> GroundingCheck:
         user = f"Passages:\n{passages}\n\nAnswer to check:\n{answer}"
         return await ask_structured(self._small, GroundingCheck, CHECK, user)
+
+    async def consult(self, case: str, passages: str) -> ConsultDraft:
+        """Runs on every intake turn, so it uses the small model and shortened passages."""
+        user = f"Intake so far:\n{case}\n\nPassages:\n{passages}"
+        return await ask_structured(self._small, ConsultDraft, CONSULT, user)

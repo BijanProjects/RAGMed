@@ -64,10 +64,58 @@ class DiagnosisAnswer(BaseModel):
     visit_reason: str = Field(description="One sentence: why this clinician and visit length.")
 
 
+class Lead(BaseModel):
+    condition: str = Field(description="A possible condition, by its plain name.")
+    fits: str = Field(description="Under 15 words: what in the case points to it.")
+    citations: list[int] = Field(description="Numbers of the passages that describe it.")
+
+
+class ConsultDraft(BaseModel):
+    """The model's working picture of an intake that is still under way."""
+
+    leads: list[Lead] = Field(
+        description="Up to 3 conditions the passages connect to the case, most likely first; "
+        "empty if none fit."
+    )
+    ask_next: list[str] = Field(
+        description="Up to 3 facts not yet known that would best tell the leads apart or "
+        "settle the urgency, most useful first, as short plain topics (for example 'whether "
+        "light makes it worse'), not questions."
+    )
+    warning_signs: list[str] = Field(
+        description="Up to 3 warning signs not yet asked about that would make this urgent, "
+        "in plain words (for example 'sudden, worst-ever headache')."
+    )
+    urgency: Urgency = Field(description="The working urgency from what is known so far.")
+    enough: bool = Field(
+        description="True if more questions would not change the leads, the urgency or who "
+        "should see them."
+    )
+
+
 class Citation(BaseModel):
     number: int
     answer_id: str
     question: str
+    excerpt: str = ""  # the passage text the answer relied on, so readers can check it
+
+
+class ConsultLead(BaseModel):
+    condition: str
+    fits: str
+    sources: list[Citation]
+
+
+class ConsultResult(BaseModel):
+    """The `consult` skill's output: grounded leads that guide the next intake question."""
+
+    leads: list[ConsultLead]
+    ask_next: list[str]
+    warning_signs: list[str]
+    urgency: Urgency
+    enough: bool
+    search_query: str
+    passages_read: int
 
 
 class DiagnosisResult(BaseModel):

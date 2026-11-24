@@ -6,6 +6,7 @@ from pydantic import Field, SecretStr
 from pydantic_settings import SettingsConfigDict
 from starlette.types import ASGIApp
 
+from diagnosis_agent.consult import build_consult_graph
 from diagnosis_agent.executor import DiagnosisExecutor
 from diagnosis_agent.graph import build_graph
 from diagnosis_agent.knowledge import Knowledge, McpKnowledge
@@ -53,7 +54,16 @@ CARD = CardSpec(
             "clinician type and visit length) as a JSON data part.",
             tags=["medical", "rag", "triage"],
             examples=["What are the symptoms of asthma?", "I have had a rash and fever"],
-        )
+        ),
+        Skill(
+            id="consult",
+            name="Intake consult",
+            description='Send the data part {"consult": {"case", "complaint", "latest", '
+            '"leads"}} during an intake to get a quick working picture: grounded leads with '
+            "sources, the facts that would best tell them apart, warning signs to check, and a "
+            "working urgency.",
+            tags=["medical", "rag", "triage", "intake"],
+        ),
     ],
 )
 
@@ -79,9 +89,9 @@ def create_diagnosis_app(
     if not tokens and settings.environment is Environment.PRODUCTION:
         raise RuntimeError("RAGMED_SERVICE_TOKENS must be set in production")
     mcp_token = settings.mcp_token.get_secret_value() if settings.mcp_token else None
-    graph = build_graph(
-        knowledge or McpKnowledge(settings.mcp_url, mcp_token),
-        reasoner or _groq_reasoner(settings),
-    )
+    knowledge = knowledge or McpKnowledge(settings.mcp_url, mcp_token)
+    reasoner = reasoner or _groq_reasoner(settings)
+    graph = build_graph(knowledge, reasoner)
+    consult = build_consult_graph(knowledge, reasoner)
     spec = dataclasses.replace(CARD, url=settings.public_url, requires_auth=bool(tokens))
-    return create_app(agent_card(spec), DiagnosisExecutor(graph), tokens=tokens or None)
+    return create_app(agent_card(spec), DiagnosisExecutor(graph, consult), tokens=tokens or None)

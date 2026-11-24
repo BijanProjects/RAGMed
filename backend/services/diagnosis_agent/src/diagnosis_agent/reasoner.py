@@ -51,12 +51,19 @@ class LlmReasoner:
     per model, and every call that carries the passages costs about 2,500 of them.
     """
 
-    def __init__(self, small: Sequence[BaseChatModel], large: Sequence[BaseChatModel]) -> None:
-        """Each role takes models in order of preference; later ones are fallbacks."""
+    def __init__(
+        self,
+        small: Sequence[BaseChatModel],
+        large: Sequence[BaseChatModel],
+        consult: Sequence[BaseChatModel] = (),
+    ) -> None:
+        """Each role takes models in order of preference; later ones are fallbacks. Consults
+        use the large models unless given their own."""
         if not small or not large:
             raise ValueError("each role needs at least one model")
         self._small = list(small)
         self._large = list(large)
+        self._consult = list(consult) or self._large
 
     async def search_query(self, question: str, previous: str | None) -> SearchQuery:
         user = f"Patient's message:\n{question}"
@@ -73,8 +80,7 @@ class LlmReasoner:
         return await ask_structured(self._small, GroundingCheck, CHECK, user)
 
     async def consult(self, case: str, passages: str) -> ConsultDraft:
-        """Runs on every intake turn, on shortened passages. It uses the large model: weighing a
-        differential needs it, and its token budget is separate from the Coordinator's, which
-        talks to the patient on the small model at the same time."""
+        """Runs on every intake turn, on shortened passages, on models whose token budget is
+        not shared with the Coordinator's or the final assessment's."""
         user = f"Intake so far:\n{case}\n\nPassages:\n{passages}"
-        return await ask_structured(self._large, ConsultDraft, CONSULT, user)
+        return await ask_structured(self._consult, ConsultDraft, CONSULT, user)

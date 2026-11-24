@@ -28,6 +28,7 @@ from ragmed_llm import AtCapacityError
 
 pytestmark = pytest.mark.anyio
 BASE = "http://coordinator.test"
+SLOTS_START = "2026-11-23T09:00:00-03:30"
 PATIENT = {"name": "Alex Sample", "email": "alex@example.org"}
 
 
@@ -123,6 +124,31 @@ async def test_a_red_flag_mid_interview_is_escalated_and_the_interview_resumes()
     assert data(resumed)["kind"] == "question"
     assert resumed.text.endswith("Let's carry on. How long have you had it?")
     assert data(await chat.send("About a month"))["kind"] == "question"
+
+
+async def test_after_the_report_a_follow_up_is_answered_in_context_and_added() -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+    chat.router.intent = "follow_up"
+
+    added = await chat.send("I also take aspirin daily")
+    asked = await chat.send("Is this serious?")
+    await chat.send(action={"type": "show_slots"})
+    await chat.book(SLOTS_START)
+
+    assert added.text == "Thanks, I've added that for your clinician."
+    assert data(added)["offer"]["clinician_type"] == "Neurology"  # booking stays one tap away
+    assert asked.text == "Your report suggests a visit soon."
+    report = chat.scheduling.bookings[0]["report"]
+    assert report["case"]["Added after the report"] == "I also take aspirin daily"
+
+
+async def test_a_follow_up_with_no_report_starts_an_intake() -> None:
+    chat = Chat(router=FakeRouter(intent="follow_up"))
+
+    reply = await chat.send("about 3 weeks")
+
+    assert data(reply)["kind"] == "question"
 
 
 async def test_after_an_emergency_the_coordinator_stays_and_answers() -> None:

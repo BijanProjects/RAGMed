@@ -8,6 +8,7 @@ EMERGENCIES = [
     ("chest tightness for 20 minutes and sweating", "chest_pain"),
     ("I think I'm having a heart attack", "chest_pain"),
     ("my dad's face is drooping and his speech is slurred", "stroke"),
+    ("Yesterday my face was drooping for a few minutes", "stroke"),
     ("sudden numbness on one side of my body", "stroke"),
     ("I think my dad is having a stroke", "stroke"),
     ("I can't breathe properly", "breathing"),

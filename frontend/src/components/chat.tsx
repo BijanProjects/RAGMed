@@ -401,7 +401,7 @@ function Bubble({
           ) : (
             <QuickReplies replies={data.quick_replies} active={active} onSend={onSend} />
           ))}
-        {data?.kind === "report" && data.offer && (
+        {(data?.kind === "report" || data?.kind === "answer") && data.offer && (
           <OfferButtons offer={data.offer} active={active} onSend={onSend} />
         )}
         {data?.kind === "slots" && data.offer && (

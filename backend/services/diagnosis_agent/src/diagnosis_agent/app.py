@@ -29,6 +29,9 @@ class DiagnosisSettings(CoreSettings):
     # instead of ~0.7 s, while the answer needs "medium" to read the question carefully.
     large_models: tuple[str, ...] = ("openai/gpt-oss-120b", "openai/gpt-oss-20b")
     small_models: tuple[str, ...] = ("openai/gpt-oss-20b", "qwen/qwen3.8-27b")
+    # Consults run on every intake turn: on their own model, so they never wait on the token
+    # budget of the Coordinator's model (small) or of the final assessment (large).
+    consult_models: tuple[str, ...] = ("qwen/qwen3.8-27b", "openai/gpt-oss-20b")
     small_reasoning: str = "low"
     large_reasoning: str = "medium"
     # Used only when every Groq model is busy; needs GOOGLE_API_KEY (see ragmed_llm.gemini).
@@ -76,6 +79,7 @@ def _groq_reasoner(settings: DiagnosisSettings) -> Reasoner:  # pragma: no cover
     return LlmReasoner(
         small=[*groq_models(settings.small_models, settings.small_reasoning), *backup],
         large=[*groq_models(settings.large_models, settings.large_reasoning), *backup],
+        consult=[*groq_models(settings.consult_models, settings.small_reasoning), *backup],
     )
 
 

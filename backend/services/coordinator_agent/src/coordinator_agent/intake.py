@@ -190,6 +190,22 @@ Respond to their latest message the way a calm, caring person on an emergency li
   in the past, or were a mistake. Then say you will carry on with the questions."""
 
 
+FOLLOW_UP = """You are the Care Coordinator at RAGMed Clinic. This patient already has a draft
+pre-visit report (below). Reply to their latest message in context, warmly and briefly:
+
+- If it adds a detail about their problem, thank them plainly, say it has been added for the
+  clinician, and put that detail, short and in their words, in `adds`.
+- If it asks about the report, the visit or what to do next, answer from the report: you
+  cannot diagnose; point to the suggested visit and its urgency; if anything sounds worse or
+  urgent, tell them to call their local emergency number or go to an emergency department.
+- Under 70 words. Never name a medicine or a dose."""
+
+
+class FollowUp(BaseModel):
+    reply: str = Field(description="What to say, under 70 words.")
+    adds: str = Field(default="", description="A new detail for the report, or empty.")
+
+
 class Support(BaseModel):
     reply: str = Field(description="What to say to the patient, under 90 words.")
     resume: bool = Field(description="True only if the emergency is clearly not happening now.")
@@ -203,6 +219,8 @@ class Interviewer(Protocol):
     async def handoff(self, case: Mapping[str, str], briefing: str, assessment: str) -> Handoff: ...
 
     async def support(self, category: str, transcript: str) -> Support: ...
+
+    async def follow_up(self, report: str, transcript: str) -> FollowUp: ...
 
 
 class LlmInterviewer:
@@ -231,6 +249,10 @@ class LlmInterviewer:
             f"Diagnosis agent's assessment:\n{assessment}"
         )
         return await ask_structured(self._models, Handoff, HANDOFF, user)
+
+    async def follow_up(self, report: str, transcript: str) -> FollowUp:
+        user = f"Report:\n{report}\n\nConversation:\n{transcript}"
+        return await ask_structured(self._models, FollowUp, FOLLOW_UP, user)
 
     async def support(self, category: str, transcript: str) -> Support:
         system = SUPPORT.format(category=category.replace("_", " "))

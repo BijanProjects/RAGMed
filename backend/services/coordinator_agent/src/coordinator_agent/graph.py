@@ -91,6 +91,7 @@ HISTORY_TURNS = 6
 MAX_CONSULTS = 6  # knowledge-base consults per intake; each costs one small-model call
 HISTORY_CHARS = 600
 UNAVAILABLE = "I could not get an answer just now. Please try again in a moment."
+ADDED = "Added after the report"
 AFTER_ALARM = ["I've called for help", "It's not happening right now"]
 NO_REPORT = "There is no report to book a visit for yet. Tell me what's bothering you first."
 
@@ -227,6 +228,8 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         route = await router.route(state["message"], history_text(state.get("history", [])))
         if route.intent == "out_of_scope" and is_clinic_request(state["message"]):
             route = Route(intent="symptoms", question="")
+        if route.intent == "follow_up" and not state.get("report"):
+            route = Route(intent="symptoms", question="")  # nothing to follow up on yet
         update: State = {"intent": route.intent, "question": route.question or state["message"]}
         if route.intent == "symptoms":
             update |= _new_intake()
@@ -239,7 +242,37 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
     def said(reply: Reply) -> State:
         return {"reply": reply.model_dump()}
 
+    async def follow_up(state: State) -> State:
+        """A message about the report just made: answer it there, and add any new detail."""
+        report = dict(state.get("report") or {})
+        turns: list[Turn] = [
+            *state.get("history", []),
+            {"role": "patient", "text": state["message"]},
+        ]
+        summary = (
+            f"{report.get('summary', '')}\nUrgency: {report.get('urgency', '')}; visit: "
+            f"{report.get('visit_minutes', '')} minutes with {report.get('clinician_type', '')}"
+        )
+        answer = await interviewer.follow_up(summary, history_text(turns, 6))
+        update: State = {}
+        if answer.adds.strip():
+            step("Added to your report for the clinician")
+            case = {**report.get("case", {})}
+            added = case.get(ADDED)
+            case[ADDED] = f"{added}; {answer.adds.strip()}" if added else answer.adds.strip()
+            report = {**report, "case": case}
+            update["report"] = report
+        offer = state.get("offer") if state.get("phase") == "report" else None
+        reply = Reply(
+            kind="answer",
+            text=answer.reply.strip(),
+            offer=Offer(**offer) if offer else None,
+        )
+        return {**update, **said(reply)}
+
     def after_route(state: State) -> str:
+        if state["intent"] == "follow_up":
+            return "follow_up"
         if state["intent"] == "symptoms":
             return "interview"
         if state["intent"] == "book_appointment":
@@ -338,7 +371,8 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             "questions": questions + 1,
             "asked_final": asked_final,
             "signs_checked": state.get("signs_checked", False) or check_signs,
-            "signs_offered": signs if check_signs else offered,
+            # Only what the patient saw: options too long to show were not offered.
+            "signs_offered": quick_replies(signs, True) if check_signs else offered,
             "reply": reply.model_dump(),
         }
 
@@ -531,6 +565,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         ("assess", assess),
         ("act", act),
         ("support", support),
+        ("follow_up", follow_up),
         ("answer", answer),
         ("canned", canned),
         ("remember", remember),
@@ -540,9 +575,11 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
     graph.add_conditional_edges(
         "screen", dispatch, ["remember", "act", "support", "interview", "route"]
     )
-    graph.add_conditional_edges("route", after_route, ["interview", "remember", "answer", "canned"])
+    graph.add_conditional_edges(
+        "route", after_route, ["follow_up", "interview", "remember", "answer", "canned"]
+    )
     graph.add_conditional_edges("interview", after_interview, ["assess", "remember"])
-    for name in ("assess", "act", "support", "answer", "canned"):
+    for name in ("assess", "act", "support", "follow_up", "answer", "canned"):
         graph.add_edge(name, "remember")
     graph.add_edge("remember", END)
     return graph.compile(checkpointer=checkpointer)

@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from coordinator_agent.intake import CaseUpdate, Handoff, IntakeTurn, Support
+from coordinator_agent.intake import CaseUpdate, FollowUp, Handoff, IntakeTurn, Support
 from coordinator_agent.router import Intent, Route
 from coordinator_agent.scheduling import SchedulingError
 from ragmed_a2a.client import AgentEvent, Progress, Reply
@@ -109,6 +109,12 @@ class FakeInterviewer:
                 multi_select=self.choices is not None,
             )
         return IntakeTurn(updates=updates, complete=True, next_question="", quick_replies=[])
+
+    async def follow_up(self, report: str, transcript: str) -> FollowUp:
+        latest = transcript.splitlines()[-1].removeprefix("patient: ")
+        if latest.endswith("?"):
+            return FollowUp(reply="Your report suggests a visit soon.", adds="")
+        return FollowUp(reply="Thanks, I've added that for your clinician.", adds=latest)
 
     async def support(self, category: str, transcript: str) -> Support:
         """Resumes when the patient says it is not happening; otherwise stays with them."""

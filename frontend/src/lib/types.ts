@@ -15,6 +15,8 @@ export interface Source {
   number: number;
   question: string;
   answer_id: string;
+  excerpt?: string; // the passage text the answer relied on
+  url?: string; // the NIH page it comes from, when it still loads
 }
 
 export interface Offer {
@@ -57,6 +59,11 @@ export interface Report {
   notice: string;
   summary: string;
   case: Record<string, string>;
+  /** The Care Coordinator's handoff to the clinician (missing on older reports). */
+  impression?: string;
+  open_questions?: string[];
+  urgency_score?: number; // 1 (emergency) to 5 (self-care)
+  score_reason?: string;
   assessment: string;
   possible_conditions: string[];
   urgency: string;
@@ -77,6 +84,7 @@ export interface ReplyData {
   sources: Source[];
   red_flag: string | null;
   quick_replies: string[];
+  multi_select?: boolean; // the patient may tick several quick replies
   report: Report | null;
   offer: Offer | null;
   slots: Slot[];
@@ -91,9 +99,17 @@ export type ChatAction =
   | { type: "resend" }
   | { type: "confirm"; code: string };
 
+/** One step of the care team's work: which agent did what. */
+export interface Step {
+  agent: string; // "Care Coordinator", "Diagnosis agent", "Knowledge base", "Scheduling"
+  text: string;
+}
+
 /** What /api/chat streams to the browser, one JSON object per event. */
 export type ChatEvent =
-  | { type: "progress"; text: string }
+  | { type: "progress"; text: string; agent?: string }
+  /** A piece of the reply while it is written; `reset` starts it again. */
+  | { type: "draft"; text: string; label?: string; reset?: boolean }
   | { type: "reply"; text: string; data: ReplyData | null; contextId: string; state: string }
   | { type: "error"; text: string };
 

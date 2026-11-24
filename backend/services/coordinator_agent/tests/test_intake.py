@@ -1,13 +1,17 @@
+from coordinator_agent.graph import record_signs
 from coordinator_agent.intake import (
     CaseUpdate,
+    briefing,
     case_lines,
+    classify_checklist,
     is_repeat,
     is_straightforward_request,
     merge,
+    natural,
     quick_replies,
 )
-from coordinator_agent.reply import build_report
-from coordinator_agent.testing import ANSWER
+from coordinator_agent.reply import build_report, triage
+from coordinator_agent.testing import ANSWER, CONSULT
 
 
 def test_merge_appends_new_facts_and_skips_non_answers() -> None:
@@ -79,3 +83,55 @@ def test_a_disclaimer_copied_into_the_assessment_is_removed() -> None:
     report = build_report({"main_problem": "rash"}, {**ANSWER, "answer": answer})
 
     assert report["assessment"] == "Measles fits [1]."
+
+
+def test_the_coordinator_may_raise_the_urgency_but_never_lower_it() -> None:
+    assert triage("routine", None) == (4, "routine")
+    assert triage("routine", 3) == (3, "routine")
+    assert triage("routine", 2) == (2, "urgent")
+    assert triage("urgent", 5) == (2, "urgent")  # the evidence says today: it stays today
+    assert triage("emergency", 4) == (1, "emergency")
+    assert triage("self_care", 3) == (3, "routine")
+    assert triage("routine", 0) == (4, "routine")  # a malformed score is ignored
+
+
+def test_the_briefing_reads_the_working_picture() -> None:
+    text = briefing(CONSULT)
+
+    assert "Considering: migraine (one-sided, recurring)" in text
+    assert "Working urgency: routine" in text
+    assert "change little: no" in text
+    assert "none yet" in briefing(None)
+    assert "nothing specific yet" in briefing({**CONSULT, "leads": []})
+
+
+def test_stock_phrases_are_dropped_from_acknowledgements() -> None:
+    assert natural("Sounds tough, thank you for sharing.") == "Sounds tough."
+    assert natural("Thanks for sharing that!") == ""
+    assert natural("  A month of that sounds tiring. ") == "A month of that sounds tiring."
+
+
+def test_the_checklist_answer_is_recorded_by_rule() -> None:
+    offered = ["Blue lips", "Cannot finish a sentence"]
+
+    assert record_signs({}, "Yes", offered) == {
+        "warning_signs": "answered “Yes” to: Blue lips, Cannot finish a sentence"
+    }
+    assert record_signs({}, "blue lips, and I feel dizzy", offered) == {
+        "warning_signs": "Blue lips"
+    }
+    assert record_signs({"negatives": "no fever"}, "None of these", offered) == {
+        "negatives": "no fever; none of: Blue lips, Cannot finish a sentence"
+    }
+
+
+def test_checklist_answers_are_read_carefully() -> None:
+    offered = ["Coughing up blood", "Shortness of breath", "Chest pain"]
+
+    assert classify_checklist("None of these", offered) == ("none", [])
+    assert classify_checklist("I get short of breath on stairs", offered) == (
+        "named",
+        ["Shortness of breath"],
+    )
+    assert classify_checklist("Yes", offered) == ("yes", [])
+    assert classify_checklist("Yes, I hear wheezing sometimes", offered) == ("unclear", [])

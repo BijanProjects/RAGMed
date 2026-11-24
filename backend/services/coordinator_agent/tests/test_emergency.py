@@ -8,6 +8,7 @@ EMERGENCIES = [
     ("chest tightness for 20 minutes and sweating", "chest_pain"),
     ("I think I'm having a heart attack", "chest_pain"),
     ("my dad's face is drooping and his speech is slurred", "stroke"),
+    ("Yesterday my face was drooping for a few minutes", "stroke"),
     ("sudden numbness on one side of my body", "stroke"),
     ("I think my dad is having a stroke", "stroke"),
     ("I can't breathe properly", "breathing"),
@@ -22,6 +23,7 @@ EMERGENCIES = [
     ("my toddler swallowed bleach", "poisoning"),
     ("I took too many pills", "poisoning"),
     ("worst headache of my life, came on suddenly", "severe_pain"),
+    ("Sudden, worst-ever headache", "severe_pain"),
     ("I have a fever and a stiff neck", "severe_pain"),
     ("I want to kill myself", "self_harm"),
     ("I don\u2019t want to live anymore", "self_harm"),  # curly apostrophe, as phones type it

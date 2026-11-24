@@ -4,7 +4,7 @@ import hmac
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
-from a2a.helpers import new_task_from_user_message
+from a2a.helpers import new_data_part, new_task_from_user_message, new_text_part
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -19,6 +19,7 @@ from a2a.types import (
     SecurityRequirement,
     SecurityScheme,
     StringList,
+    TaskState,
 )
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -159,3 +160,23 @@ async def start_task(context: RequestContext, event_queue: EventQueue) -> TaskUp
     if context.current_task is None:
         await event_queue.enqueue_event(new_task_from_user_message(context.message))
     return TaskUpdater(event_queue, context.task_id, context.context_id)
+
+
+async def report_progress(updater: TaskUpdater, text: str, agent: str = "") -> None:
+    """A "working" status update. `agent` names who is acting (for example "Knowledge base"),
+    sent as a data part beside the text so a client can show which agent is doing what."""
+    parts = [new_text_part(text)]
+    if agent:
+        parts.append(new_data_part({"agent": agent}))
+    await updater.update_status(TaskState.TASK_STATE_WORKING, updater.new_agent_message(parts))
+
+
+async def report_draft(
+    updater: TaskUpdater, text: str, *, agent: str = "", label: str = "", reset: bool = False
+) -> None:
+    """A piece of a reply still being written, sent as a "working" status update with only a
+    data part {"draft": ..., "reset": ...}. `reset` starts the draft again; `label` says what
+    the draft is (for example that it is not yet checked against its sources)."""
+    data = {"draft": text, "reset": reset, "agent": agent, "label": label}
+    message = updater.new_agent_message([new_data_part(data)])
+    await updater.update_status(TaskState.TASK_STATE_WORKING, message)

@@ -8,24 +8,27 @@ from pydantic import SecretStr
 from coordinator_agent.app import CoordinatorSettings, create_coordinator_app, make_mailer
 from coordinator_agent.emergency import CRISIS_GUIDANCE, EMERGENCY_GUIDANCE
 from coordinator_agent.executor import AT_CAPACITY
+from coordinator_agent.graph import MAX_CONSULTS
 from coordinator_agent.intake import FINAL_QUESTION, MAX_QUESTIONS
 from coordinator_agent.mailer import RecordingMailer, SmtpMailer, code_email
 from coordinator_agent.reply import BOOKING_START, DISCLAIMER, GREETING, OUT_OF_SCOPE
 from coordinator_agent.router import is_clinic_request
 from coordinator_agent.testing import (
     ANSWER,
+    WITH_SIGNS,
     FakeDiagnosis,
     FakeInterviewer,
     FakeRouter,
     FakeScheduling,
 )
-from ragmed_a2a.client import Progress, RemoteAgent, Reply
+from ragmed_a2a.client import Draft, Progress, RemoteAgent, Reply
 from ragmed_core.clinic import DRAFT_NOTICE
 from ragmed_core.settings import Environment
 from ragmed_llm import AtCapacityError
 
 pytestmark = pytest.mark.anyio
 BASE = "http://coordinator.test"
+SLOTS_START = "2026-11-23T09:00:00-03:30"
 PATIENT = {"name": "Alex Sample", "email": "alex@example.org"}
 
 
@@ -56,6 +59,7 @@ class Chat:
         self.agent = RemoteAgent(BASE, transport=httpx.ASGITransport(app=app))
         self.context_id: str | None = None
         self.progress: list[str] = []
+        self.steps: list[tuple[str, str]] = []  # (agent, what it did)
 
     async def send(self, text: str = "", action: dict[str, Any] | None = None) -> Reply:
         data = {"action": action} if action else None
@@ -64,6 +68,8 @@ class Chat:
         assert isinstance(reply, Reply)
         self.context_id = reply.context_id
         self.progress = [e.text for e in events if isinstance(e, Progress)]
+        self.steps = [(e.agent, e.text) for e in events if isinstance(e, Progress)]
+        self.drafts = [e for e in events if isinstance(e, Draft)]
         return reply
 
     async def interview_to_report(self) -> Reply:
@@ -112,10 +118,102 @@ async def test_a_red_flag_mid_interview_is_escalated_and_the_interview_resumes()
     await chat.send("I keep getting headaches")
 
     alarm = await chat.send("now my face is drooping")
-    resumed = await chat.send("About a month")
+    resumed = await chat.send("It's not happening right now, it was yesterday")
 
     assert data(alarm)["kind"] == "emergency"
+    assert data(alarm)["quick_replies"] == ["I've called for help", "It's not happening right now"]
     assert data(resumed)["kind"] == "question"
+    assert resumed.text.endswith("Let's carry on. How long have you had it?")
+    assert data(await chat.send("About a month"))["kind"] == "question"
+
+
+async def test_after_the_report_a_follow_up_is_answered_in_context_and_added() -> None:
+    chat = Chat()
+    await chat.interview_to_report()
+    chat.router.intent = "follow_up"
+
+    added = await chat.send("I also take aspirin daily")
+    asked = await chat.send("Is this serious?")
+    await chat.send(action={"type": "show_slots"})
+    await chat.book(SLOTS_START)
+
+    assert added.text == "Thanks, I've added that for your clinician."
+    assert data(added)["offer"]["clinician_type"] == "Neurology"  # booking stays one tap away
+    assert asked.text == "Your report suggests a visit soon."
+    report = chat.scheduling.bookings[0]["report"]
+    assert report["case"]["Added after the report"] == "I also take aspirin daily"
+
+
+async def test_a_follow_up_with_no_report_starts_an_intake() -> None:
+    chat = Chat(router=FakeRouter(intent="follow_up"))
+
+    reply = await chat.send("about 3 weeks")
+
+    assert data(reply)["kind"] == "question"
+
+
+async def test_a_cited_answer_streams_as_a_labelled_draft() -> None:
+    chat = Chat(router=FakeRouter(intent="medical_question"))
+
+    await chat.send("What causes migraines?")
+
+    assert chat.drafts[0].reset is True
+    assert chat.drafts[1].text == "Recurring headaches "
+    assert chat.drafts[1].label == "Draft · checking against sources"
+
+
+async def test_the_coordinators_own_reply_streams_as_it_is_written() -> None:
+    chat = Chat()
+    await chat.send("I keep getting headaches")
+    await chat.send("now my face is drooping")
+
+    await chat.send("doctors are not available what should i do?")
+
+    assert "".join(d.text for d in chat.drafts) == (
+        "Emergency departments need no appointment. Call now."
+    )
+
+
+async def test_after_an_emergency_the_coordinator_stays_and_answers() -> None:
+    chat = Chat()
+    await chat.send("I keep getting headaches")
+    await chat.send("now my face is drooping")
+
+    reply = await chat.send("doctors are not available what should i do?")
+
+    assert data(reply)["kind"] == "emergency"
+    assert reply.text.startswith("Emergency departments need no appointment.")
+    assert EMERGENCY_GUIDANCE in reply.text
+    category, transcript = chat.interviewer.supported[0]
+    assert category == "stroke"
+    assert "doctors are not available" in transcript
+    assert len(chat.interviewer.calls) == 1  # no interview question while it is an emergency
+
+
+async def test_a_ticked_warning_sign_ends_the_questions_with_an_urgent_report() -> None:
+    chat = Chat(diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)))
+    await chat.send("I keep getting headaches on one side")
+    await chat.send("About a month")  # then the checklist
+
+    report = await chat.send("Sudden, worst-ever headache")  # the screen catches this one too
+    assert data(report)["kind"] == "emergency"
+
+    chat = Chat(
+        diagnosis=FakeDiagnosis(
+            consult={**WITH_SIGNS, "warning_signs": ["A fever that will not come down"]}
+        )
+    )
+    await chat.send("I keep getting headaches on one side")
+    await chat.send("About a month")
+    report = await chat.send("A fever that will not come down")
+
+    payload = data(report)
+    assert payload["kind"] == "report"
+    assert payload["urgency"] == "urgent"
+    assert payload["report"]["urgency_score"] == 2
+    assert report.text.startswith("**Some of what you ticked can be serious.**")
+    assert payload["report"]["case"]["Warning signs reported"] == "A fever that will not come down"
+    assert "Warning signs reported: A fever" in chat.diagnosis.questions[0]
 
 
 # The intake interview --------------------------------------------------------------------
@@ -167,6 +265,155 @@ async def test_the_interview_stops_after_the_question_limit() -> None:
     assert reply.text == FINAL_QUESTION
 
 
+async def test_every_intake_turn_consults_the_diagnosis_agent_first() -> None:
+    chat = Chat()
+
+    await chat.send("I keep getting headaches on one side")
+    await chat.send("About a month")
+
+    first, second = chat.diagnosis.consults
+    assert first["complaint"] == "I keep getting headaches on one side"
+    assert first["leads"] == []
+    assert second["latest"] == "How long have you had it? About a month"  # with its question
+    assert second["leads"] == ["migraine"]  # the next search starts from the last leads
+    briefing = chat.interviewer.briefings[0]
+    assert "migraine (one-sided, recurring)" in briefing
+    assert "whether light or noise makes it worse" in briefing
+
+
+async def test_each_step_names_the_agent_doing_it() -> None:
+    chat = Chat()
+
+    await chat.send("I keep getting headaches on one side")
+
+    agents = [agent for agent, _ in chat.steps]
+    assert chat.steps[0] == ("Care Coordinator", "Reading your message")
+    assert agents.index("Knowledge base") < len(agents) - 1
+    assert chat.steps[-1] == ("Care Coordinator", "Asking next: it helps tell possibilities apart")
+
+
+async def test_warning_signs_are_checked_as_a_checklist_after_the_first_answer() -> None:
+    questions = ["How long have you had it?", "Unused?", "How bad is it, from 0 to 10?"]
+    chat = Chat(
+        interviewer=FakeInterviewer(questions=questions),
+        diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)),
+    )
+
+    first = await chat.send("I keep getting headaches on one side")
+    check = await chat.send("About a month")
+    after = await chat.send("None of these")
+
+    assert first.text == "How long have you had it?"
+    assert check.text == "Before we go on, have you had any of these?"
+    assert data(check)["multi_select"] is True
+    assert data(check)["quick_replies"] == [
+        "Sudden, worst-ever headache",
+        "Fever with a stiff neck",
+    ]
+    assert after.text == "How bad is it, from 0 to 10?"  # asked once, then the interview goes on
+
+
+async def test_an_unclear_checklist_answer_is_asked_once_more() -> None:
+    chat = Chat(diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)))
+    await chat.send("I keep getting headaches on one side")
+    await chat.send("About a month")  # then the checklist
+
+    again = await chat.send("Yes, it hurts a lot")
+    second = await chat.send("Not sure, maybe")
+
+    assert again.text.startswith("Just to be sure: have you had any of these")
+    assert data(again)["quick_replies"] == [
+        "Sudden, worst-ever headache",
+        "Fever with a stiff neck",
+    ]
+    assert data(second)["kind"] == "report"  # still unclear: treated as a warning sign, to be safe
+    assert data(second)["urgency"] == "urgent"
+
+
+async def test_an_urgent_picture_checks_warning_signs_at_once() -> None:
+    chat = Chat(diagnosis=FakeDiagnosis(consult={**WITH_SIGNS, "urgency": "urgent"}))
+
+    first = await chat.send("A bad headache that came on suddenly")
+
+    assert first.text == "Before we go on, have you had any of these?"
+
+
+async def test_the_intake_never_ends_without_the_warning_sign_check() -> None:
+    chat = Chat(
+        interviewer=FakeInterviewer(questions=[]),  # wants to finish at once
+        diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)),
+    )
+
+    check = await chat.send("headaches")
+    final = await chat.send("None of these")
+
+    assert check.text == "Before we go on, have you had any of these?"
+    assert final.text == FINAL_QUESTION
+
+
+async def test_the_intake_carries_on_when_a_consult_fails() -> None:
+    chat = Chat(diagnosis=FakeDiagnosis(consult=None))
+
+    reply = await chat.send("I keep getting headaches on one side")
+
+    assert reply.text == "How long have you had it?"
+    assert "none yet" in chat.interviewer.briefings[0]
+    assert any("knowledge base is unavailable" in p for p in chat.progress)
+
+
+async def test_consults_stop_at_their_limit() -> None:
+    chat = Chat(interviewer=FakeInterviewer(questions=[f"Q{n}?" for n in range(30)]))
+    await chat.send("headaches")
+    for _ in range(MAX_CONSULTS + 2):
+        await chat.send("an answer")
+
+    assert len(chat.diagnosis.consults) == MAX_CONSULTS
+
+
+async def test_a_question_can_let_the_patient_pick_several_answers() -> None:
+    options = ["Nausea", "Light hurts", "Nausea", "Blurred vision", *[f"S{n}" for n in range(8)]]
+    chat = Chat(interviewer=FakeInterviewer(choices=options))
+
+    reply = await chat.send("I keep getting headaches on one side")
+
+    assert data(reply)["multi_select"] is True
+    assert data(reply)["quick_replies"] == [
+        "Nausea", "Light hurts", "Blurred vision", "S0", "S1", "S2", "S3", "S4",
+    ]  # fmt: skip
+    assert data(await Chat().send("headaches"))["multi_select"] is False
+
+
+async def test_an_acknowledgement_leads_into_the_question() -> None:
+    chat = Chat(interviewer=FakeInterviewer(acknowledgement="A month of that sounds tiring."))
+    await chat.send("I keep getting headaches on one side")
+
+    reply = await chat.send("About a month")
+
+    assert reply.text == "A month of that sounds tiring. How bad is it, from 0 to 10?"
+
+
+async def test_the_report_carries_the_handoff_and_an_urgency_score() -> None:
+    chat = Chat()
+
+    report = await chat.interview_to_report()
+
+    payload = data(report)["report"]
+    assert payload["urgency_score"] == 4
+    assert payload["impression"].startswith("One-sided recurring headaches")
+    assert payload["open_questions"] == ["Neurological examination"]
+    assert "**Urgency score: 4 of 5**" in report.text
+    assert "Handoff note for your clinician" in report.text
+    assert "Possibilities considered during the intake: migraine" in chat.diagnosis.questions[0]
+    assert "Possible conditions: migraine" in chat.interviewer.handoffs[0]
+
+
+async def test_the_coordinator_can_raise_the_urgency_of_the_visit() -> None:
+    report = await Chat(interviewer=FakeInterviewer(score=2)).interview_to_report()
+
+    assert data(report)["report"]["urgency_score"] == 2
+    assert data(report)["offer"]["urgency"] == "urgent"
+
+
 async def test_a_complete_interview_produces_a_draft_report_and_an_offer() -> None:
     chat = Chat()
 
@@ -186,7 +433,7 @@ async def test_a_complete_interview_produces_a_draft_report_and_an_offer() -> No
     }
     assert "Other notes" not in payload["report"]["case"]  # "no, that's everything" is not a note
     assert "Main problem: I keep getting headaches on one side" in chat.diagnosis.questions[0]
-    assert "Preparing your draft report" in chat.progress
+    assert any(p.startswith("Preparing your draft report") for p in chat.progress)
 
 
 async def test_a_real_answer_to_the_open_question_goes_into_the_report() -> None:

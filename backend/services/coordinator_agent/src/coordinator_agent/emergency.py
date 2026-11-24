@@ -38,7 +38,9 @@ _RULES: list[tuple[str, str, list[str]]] = [
         r"\bcrushing\b.*\bchest\b", r"\bheart attack\b",
     ]),
     ("stroke", EMERGENCY_GUIDANCE, [
-        r"\b(face|mouth) (is )?(drooping|droops?)\b", r"\bslurr(ed|ing) (speech|words)\b",
+        # Past tense too: a face that drooped for a few minutes can be a mini-stroke (TIA).
+        r"\b(face|mouth) (is |was |went |started )?(drooping|droop(s|ed)?)\b",
+        r"\bslurr(ed|ing) (speech|words)\b",
         r"\b(can'?t|cannot|unable to) (speak|talk|move (my|one) (arm|leg|side))\b",
         r"\b(numb|weak)(ness)? (on|in) (one|the (left|right)) side\b",
         # Someone having a stroke now; "my mother had a stroke" is family history, not a flag.
@@ -68,6 +70,7 @@ _RULES: list[tuple[str, str, list[str]]] = [
     ]),
     ("severe_pain", EMERGENCY_GUIDANCE, [
         r"\bworst headache (of|in) my life\b", r"\bsudden severe headache\b",
+        r"\bworst[- ]ever headache\b", r"\bthunderclap\b",
         r"\bstiff neck\b.*\bfever\b|\bfever\b.*\bstiff neck\b",
     ]),
 ]  # fmt: skip

@@ -55,6 +55,8 @@ async def test_search_returns_the_best_answer_first(client: McpClient) -> None:
 
     assert hits[0]["answer_id"] == "d1"
     assert hits[0]["source"] == "MedQuAD"
+    assert hits[0]["url"] == "https://medlineplus.gov/diabetes.html"
+    assert hits[1]["url"] == ""  # no known page
     assert 0 < hits[0]["score"] <= 1
     assert len(hits) == 2
 
@@ -102,6 +104,7 @@ async def test_get_passage_returns_the_full_answer(client: McpClient) -> None:
         "qtype": "causes",
         "text": "Influenza is caused by a virus.",
         "source": "MedQuAD",
+        "url": "",
     }
 
 

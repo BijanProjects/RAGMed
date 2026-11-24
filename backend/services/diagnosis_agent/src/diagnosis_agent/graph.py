@@ -9,8 +9,10 @@ The answer step also judges the evidence (`answerable`), to stay within Groq's f
 """
 
 import re
+from collections.abc import Callable
 from typing import Any, TypedDict
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -72,6 +74,18 @@ def number_passages(passages: list[Passage], only: set[int] | None = None) -> st
 
 
 _URGENCY_ORDER: list[Urgency] = ["self_care", "routine", "urgent", "emergency"]
+EXCERPT_CHARS = 1500
+
+
+def cite(number: int, passage: Passage) -> Citation:
+    """A source as readers see it: its title and the text that was read."""
+    return Citation(
+        number=number,
+        answer_id=passage.answer_id,
+        question=label(passage),
+        excerpt=passage.text[:EXCERPT_CHARS],
+        url=passage.url,
+    )
 
 
 def label(passage: Passage) -> str:
@@ -82,6 +96,33 @@ def label(passage: Passage) -> str:
         opening = " ".join(passage.text.split()[:12])
         return f"{question} {opening}…"
     return question
+
+
+class DraftSentences:
+    """Passes a streamed draft on a sentence at a time, never one that mentions a dose.
+
+    The draft is shown while it is written, marked as unchecked; the grounding check runs on
+    the whole answer afterwards. Doses are removed whatever the check says, so they are held
+    back here too.
+    """
+
+    def __init__(self, emit: Callable[[str], None]) -> None:
+        self._emit = emit
+        self._buffer = ""
+
+    def feed(self, text: str) -> None:
+        self._buffer += text
+        *done, self._buffer = _SENTENCE.split(self._buffer)
+        for sentence in done:
+            self._send(sentence)
+
+    def flush(self) -> None:
+        self._send(self._buffer)
+        self._buffer = ""
+
+    def _send(self, sentence: str) -> None:
+        if sentence.strip() and not _DOSE.search(sentence):
+            self._emit(sentence.strip() + " ")
 
 
 def remove_doses(text: str) -> str:
@@ -131,10 +172,7 @@ def finalise(draft: DiagnosisAnswer, passages: list[Passage], query: str) -> Dia
     numbers = sorted({n for n in draft.citations if 1 <= n <= len(passages)})
     return DiagnosisResult(
         answer=answer,
-        citations=[
-            Citation(number=n, answer_id=passages[n - 1].answer_id, question=label(passages[n - 1]))
-            for n in numbers
-        ],
+        citations=[cite(n, passages[n - 1]) for n in numbers],
         possible_conditions=draft.possible_conditions,
         urgency=draft.urgency,
         recommend_visit=draft.recommend_visit or draft.urgency in ("urgent", "emergency"),
@@ -172,7 +210,13 @@ def build_graph(knowledge: Knowledge, reasoner: Reasoner) -> CompiledStateGraph[
         instructions = await knowledge.answer_instructions(
             state["question"], number_passages(state["passages"])
         )
-        return {"draft": await reasoner.answer(instructions)}
+        writer = get_stream_writer()
+        writer({"progress": "Reading the sources and writing the answer"})
+        writer({"draft": "", "reset": True})  # a second search starts a new draft
+        sentences = DraftSentences(lambda sentence: writer({"draft": sentence}))
+        draft = await reasoner.answer(state["question"], instructions, sentences.feed)
+        sentences.flush()
+        return {"draft": draft}
 
     def after_generate(state: State) -> str:
         draft = state["draft"]

@@ -7,7 +7,7 @@ from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.types import TaskState
 
-from ragmed_a2a.client import Progress, RemoteAgent, Reply
+from ragmed_a2a.client import AgentEvent, Progress, RemoteAgent, Reply
 from ragmed_a2a.server import CardSpec, Skill, agent_card, create_app, start_task
 from ragmed_core.tracing import TraceContext, trace_scope
 
@@ -51,7 +51,7 @@ def build(tokens: dict[str, str] | None = None) -> httpx.ASGITransport:
     return httpx.ASGITransport(app=create_app(agent_card(spec), Echo(), tokens=tokens))
 
 
-async def collect(agent: RemoteAgent, text: str, **kwargs: Any) -> list[Progress | Reply]:
+async def collect(agent: RemoteAgent, text: str, **kwargs: Any) -> list[AgentEvent]:
     try:
         return [event async for event in agent.stream(text, **kwargs)]
     finally:

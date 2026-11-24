@@ -12,6 +12,7 @@ from diagnosis_agent.graph import (
     remove_doses,
     remove_sentences,
 )
+from diagnosis_agent.reasoner import citations_in, might_refuse
 from diagnosis_agent.schema import DiagnosisAnswer, DiagnosisResult
 from diagnosis_agent.testing import PASSAGES, FakeKnowledge, FakeReasoner
 
@@ -240,3 +241,11 @@ def test_merged_passages_keep_order_without_repeats_and_are_capped() -> None:
     merged = merge_passages([many[3], many[0]], many)
 
     assert [p.answer_id for p in merged] == ["a3", "a0", "a1", "a2", "a4", "a5"]
+
+
+def test_a_refusal_is_never_shown_as_a_draft() -> None:
+    assert might_refuse("")
+    assert might_refuse("NOT_EN")
+    assert might_refuse("I do not have enough information to answer this.")
+    assert not might_refuse("Asthma is caused by [1].")
+    assert citations_in("Genes [3], and infections [1, 2].") == [1, 2, 3]

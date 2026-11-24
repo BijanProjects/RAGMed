@@ -28,6 +28,30 @@ function textOf(parts: Part[] | undefined): string {
   return (parts ?? []).map((p) => p.text ?? "").join("").trim();
 }
 
+/** A piece of a reply being written, from a status message's data part ({"draft": "..."}). */
+function draftOf(parts: Part[] | undefined): { text: string; label?: string; reset?: boolean } | undefined {
+  for (const part of parts ?? []) {
+    const data = part.data as { draft?: unknown; label?: unknown; reset?: unknown } | undefined;
+    if (typeof data?.draft === "string") {
+      return {
+        text: data.draft,
+        label: typeof data.label === "string" && data.label ? data.label : undefined,
+        reset: data.reset === true,
+      };
+    }
+  }
+  return undefined;
+}
+
+/** Who is acting, from a status message's data part ({"agent": "..."}), if it says. */
+function agentOf(parts: Part[] | undefined): string | undefined {
+  for (const part of parts ?? []) {
+    const agent = (part.data as { agent?: unknown } | undefined)?.agent;
+    if (typeof agent === "string" && agent.length <= 40) return agent;
+  }
+  return undefined;
+}
+
 /** Parse a Server-Sent Events stream into the JSON payload of each `data:` event. */
 async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<unknown> {
   const reader = body.getReader();
@@ -132,7 +156,10 @@ export async function* askCoordinator(
         state = FINAL_STATES[raw];
         if (messageText && !text) text = messageText;
       } else if (messageText) {
-        yield { type: "progress", text: messageText };
+        yield { type: "progress", text: messageText, agent: agentOf(statusMessage?.parts) };
+      } else {
+        const draft = draftOf(statusMessage?.parts);
+        if (draft) yield { type: "draft", ...draft };
       }
     }
   }

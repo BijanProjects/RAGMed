@@ -5,6 +5,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { formatWhen } from "@/components/chat";
+import { Sources } from "@/components/sources";
 import type { ClinicAppointment } from "@/lib/types";
 
 const URGENCY: Record<string, string> = {
@@ -100,12 +101,35 @@ export function ClinicianView() {
             <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${URGENCY[visit.urgency] ?? ""}`}>
               {visit.urgency.replace("_", " ")}
             </span>
+            {visit.report.urgency_score && (
+              <span className="rounded-full border border-black/15 px-2 py-0.5 text-xs font-medium dark:border-white/20">
+                Score {visit.report.urgency_score}/5
+              </span>
+            )}
             <span className="font-mono text-sm">{visit.reference}</span>
             {visit.patient_name && <span className="text-sm font-medium">{visit.patient_name}</span>}
             <span className="text-sm text-neutral-500">
               {formatWhen(visit.start)} · {Math.round(visit.minutes)} min · {visit.physician} ({visit.clinician_type})
             </span>
           </div>
+          {visit.report.impression && (
+            <div className="rounded-xl bg-sky-50 p-3 text-sm dark:bg-sky-950/40">
+              <p className="font-medium">Care Coordinator&apos;s handoff</p>
+              <p>{visit.report.impression}</p>
+              {visit.report.score_reason && (
+                <p className="mt-1 text-neutral-600 dark:text-neutral-400">
+                  Urgency {visit.report.urgency_score}/5: {visit.report.score_reason}
+                </p>
+              )}
+              {(visit.report.open_questions ?? []).length > 0 && (
+                <ul className="mt-1 list-disc pl-5">
+                  {visit.report.open_questions!.map((question) => (
+                    <li key={question}>{question}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
             {Object.entries(visit.report.case).map(([label, value]) => (
               <div key={label} className="contents">
@@ -125,14 +149,29 @@ export function ClinicianView() {
               <span className="font-medium">To consider:</span> {visit.report.possible_conditions.join(", ")}
             </p>
           )}
-          {visit.report.sources.length > 0 && (
-            <p className="text-xs text-neutral-500">
-              Sources: {visit.report.sources.map((s) => `${s.number}. ${s.question}`).join(" · ")}
-            </p>
-          )}
+          <ClinicianSources visit={visit} />
           <p className="text-xs text-neutral-500">{visit.report.notice}</p>
         </article>
       ))}
     </div>
+  );
+}
+
+function ClinicianSources({ visit }: { visit: ClinicAppointment }) {
+  const [open, setOpen] = useState<Set<number>>(new Set());
+  return (
+    <Sources
+      sources={visit.report.sources}
+      prefix={`source-${visit.reference}`}
+      open={open}
+      onToggle={(number, isOpen) =>
+        setOpen((all) => {
+          const next = new Set(all);
+          if (isOpen) next.add(number);
+          else next.delete(number);
+          return next;
+        })
+      }
+    />
   );
 }

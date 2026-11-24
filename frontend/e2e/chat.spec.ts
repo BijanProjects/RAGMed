@@ -235,3 +235,154 @@ test("after a booking error the time picker can be used again", async ({ page })
   await fill();
   await expect(page.getByRole("form", { name: "Enter your code" })).toBeVisible();
 });
+
+test("each step names its agent, and the team's work stays available after the reply", async ({ page }) => {
+  await mockChat(page, () => [
+    { type: "progress", text: "Reading your message", agent: "Care Coordinator" },
+    { type: "progress", text: "Searched for “one-sided headache”: 4 passages", agent: "Knowledge base" },
+    { type: "progress", text: "Weighed the evidence: considering migraine", agent: "Diagnosis agent" },
+    reply("question", "Does light or noise make it worse?"),
+  ]);
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("headaches on one side");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Does light or noise make it worse?")).toBeVisible();
+
+  await page.getByText("How the care team worked on this · 3 steps").click();
+  const log = page.getByRole("list", { name: "Care team activity" });
+  await expect(log).toContainText("Knowledge base · Searched for “one-sided headache”: 4 passages");
+  await expect(log).toContainText("Diagnosis agent · Weighed the evidence: considering migraine");
+});
+
+test("a citation opens the passage it came from, with a link to read more", async ({ page }) => {
+  const source = {
+    number: 1,
+    question: "What are the symptoms of Asthma?",
+    answer_id: "a1",
+    excerpt: "Common asthma symptoms include coughing, wheezing and chest tightness.",
+  };
+  await mockChat(page, () => [
+    reply("answer", "Wheezing is a common sign of asthma [1].\n\n**Sources** (MedQuAD):\n1. What are the symptoms of Asthma?", {
+      sources: [source],
+    }),
+  ]);
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("Why do I wheeze?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("link", { name: "Source 1" }).click();
+
+  const card = page.locator("details", { hasText: "What are the symptoms of Asthma?" });
+  await expect(card.getByText("Common asthma symptoms include")).toBeVisible();
+  const more = card.getByRole("link", { name: /Search MedlinePlus for this topic/ });
+  await expect(more).toHaveAttribute("href", /medlineplus.*query=Asthma$/);
+  await expect(more).toHaveAttribute("target", "_blank");
+  await expect(page.getByText("1. What are the symptoms of Asthma?")).toHaveCount(0); // shown as a card, not a list
+});
+
+test("a multiple-choice question sends every option ticked", async ({ page }) => {
+  const requests = await mockChat(page, (body) =>
+    body.message === "headaches"
+      ? [reply("question", "Do you have any of these as well?", {
+          quick_replies: ["Nausea", "Light hurts", "Blurred vision"], multi_select: true,
+        })]
+      : [reply("question", "Thanks. How old are you?")],
+  );
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("headaches");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const choices = page.getByRole("group", { name: "Choose all that apply" });
+  await choices.getByRole("checkbox", { name: "Nausea" }).click();
+  await choices.getByRole("checkbox", { name: /Blurred vision/ }).click();
+  await expect(choices.getByRole("checkbox", { name: /Nausea/ })).toHaveAttribute("aria-checked", "true");
+  await choices.getByRole("button", { name: "Send 2 selected" }).click();
+
+  await expect(page.getByText("Thanks. How old are you?")).toBeVisible();
+  expect(requests[1].message).toBe("Nausea, Blurred vision");
+});
+
+test("'None of these' clears the other choices", async ({ page }) => {
+  const requests = await mockChat(page, (body) =>
+    body.message === "cough"
+      ? [reply("question", "Any of these?", { quick_replies: ["Fever", "Wheezing"], multi_select: true })]
+      : [reply("question", "How long have you had the cough?")],
+  );
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("cough");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const choices = page.getByRole("group", { name: "Choose all that apply" });
+  await choices.getByRole("checkbox", { name: "Fever" }).click();
+  await choices.getByRole("checkbox", { name: "None of these" }).click();
+  await choices.getByRole("button", { name: "Send: none of these" }).click();
+
+  await expect(page.getByText("How long have you had the cough?")).toBeVisible();
+  expect(requests[1].message).toBe("None of these");
+});
+
+test("after an emergency the patient can say it has passed, and a general answer has no self-care badge", async ({ page }) => {
+  const requests = await mockChat(page, (body) =>
+    body.message === "my face is drooping"
+      ? [reply("emergency", "**This may be a medical emergency.**", {
+          urgency: "emergency", quick_replies: ["I've called for help", "It's not happening right now"],
+        })]
+      : body.message === "What causes asthma?"
+        ? [reply("answer", "Genes and environment [1].", { urgency: "self_care" })]
+        : [reply("question", "Good. Let's carry on.")],
+  );
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("What causes asthma?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Genes and environment")).toBeVisible();
+  await expect(page.getByText("Self-care", { exact: true })).toHaveCount(0);
+
+  await page.getByLabel("Your message").fill("my face is drooping");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByRole("button", { name: "It's not happening right now" }).click();
+  await expect(page.getByText("Good. Let's carry on.")).toBeVisible();
+  expect(requests.at(-1)?.message).toBe("It's not happening right now");
+});
+
+test("a source with a known page links straight to it", async ({ page }) => {
+  await mockChat(page, () => [
+    reply("answer", "Inhalers help [1].", {
+      sources: [{ number: 1, question: "How is asthma treated?", answer_id: "a2", excerpt: "Inhalers.",
+        url: "https://medlineplus.gov/asthma.html" }],
+    }),
+  ]);
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("asthma treatment");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByRole("link", { name: "Source 1" }).click();
+
+  const link = page.getByRole("link", { name: "Read the full page on medlineplus.gov ↗" });
+  await expect(link).toHaveAttribute("href", "https://medlineplus.gov/asthma.html");
+});
+
+test("a reply streams in as a labelled draft, then the checked answer replaces it", async ({ page }) => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/chat", async (route) => {
+    await gate;
+    const events = [
+      { type: "draft", text: "", reset: true, label: "Draft · checking against sources" },
+      { type: "draft", text: "Asthma is caused by ", label: "Draft · checking against sources" },
+      { type: "draft", text: "inflamed airways. ", label: "Draft · checking against sources" },
+      reply("answer", "Asthma is caused by inflamed airways [1]."),
+    ];
+    await route.fulfill({ status: 200, contentType: "application/x-ndjson",
+      body: events.map((e) => JSON.stringify(e)).join("\n") + "\n" });
+  });
+
+  await openChat(page);
+  await page.getByLabel("Your message").fill("What causes asthma?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  release();
+
+  await expect(page.getByText("Asthma is caused by inflamed airways [1].")).toBeVisible();
+  await expect(page.locator("[data-draft]")).toHaveCount(0); // the draft is gone once checked
+});

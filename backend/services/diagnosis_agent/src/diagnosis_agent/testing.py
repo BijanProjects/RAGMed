@@ -1,14 +1,23 @@
 """Fakes for tests: a knowledge base and a reasoner that need no network or model."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from diagnosis_agent.schema import DiagnosisAnswer, GroundingCheck, Passage, SearchQuery
+from diagnosis_agent.schema import (
+    ConsultDraft,
+    DiagnosisAnswer,
+    GroundingCheck,
+    Lead,
+    Passage,
+    SearchQuery,
+)
 
 PASSAGES = [
     Passage(answer_id="a1", question="What causes asthma?", qtype="causes",
             text="Asthma is caused by inflamed airways.", score=0.8),
     Passage(answer_id="a2", question="How is asthma treated?", qtype="treatment",
-            text="Asthma is treated with inhalers.", score=0.7),
+            text="Asthma is treated with inhalers.", score=0.7,
+            url="https://medlineplus.gov/asthma.html"),
 ]  # fmt: skip
 
 
@@ -41,6 +50,18 @@ class FakeReasoner:
             visit_reason="Breathing problems need a specialist assessment.",
         )
     )
+    consult_given: ConsultDraft = field(
+        default_factory=lambda: ConsultDraft(
+            leads=[
+                Lead(condition="asthma", fits="wheeze at night", citations=[1, 2]),
+                Lead(condition="a guess", fits="no source", citations=[9]),
+            ],
+            ask_next=["whether exercise brings it on", " "],
+            warning_signs=["lips turning blue"],
+            urgency="routine",
+            enough=False,
+        )
+    )
     unsupported: list[str] = field(default_factory=list)
     condition: str = ""
     calls: list[str] = field(default_factory=list)
@@ -51,10 +72,23 @@ class FakeReasoner:
         self.previous_queries.append(previous)
         return SearchQuery(query=f"query {len(self.previous_queries)}", condition=self.condition)
 
-    async def answer(self, instructions: str) -> DiagnosisAnswer:
+    async def answer(
+        self,
+        question: str,
+        instructions: str,
+        write: Callable[[str], None] | None = None,
+    ) -> DiagnosisAnswer:
         self.calls.append("answer")
-        return self.answer_given.model_copy(update={"answerable": self.answerable.pop(0)})
+        answerable = self.answerable.pop(0)
+        if write and answerable:
+            for word in self.answer_given.answer.split(" "):
+                write(word + " ")
+        return self.answer_given.model_copy(update={"answerable": answerable})
 
     async def check(self, answer: str, passages: str) -> GroundingCheck:
         self.calls.append("check")
         return GroundingCheck(unsupported=list(self.unsupported))
+
+    async def consult(self, case: str, passages: str) -> ConsultDraft:
+        self.calls.append("consult")
+        return self.consult_given

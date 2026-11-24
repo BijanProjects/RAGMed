@@ -31,11 +31,16 @@ CONSULT: dict[str, Any] = {
         }
     ],
     "ask_next": ["whether light or noise makes it worse"],
-    "warning_signs": ["sudden, worst-ever headache"],
+    "warning_signs": [],
     "urgency": "routine",
     "enough": False,
     "search_query": "one-sided headache",
     "passages_read": 4,
+}
+
+WITH_SIGNS: dict[str, Any] = {
+    **CONSULT,
+    "warning_signs": ["Sudden, worst-ever headache", "Fever with a stiff neck"],
 }
 
 SLOTS: list[dict[str, Any]] = [

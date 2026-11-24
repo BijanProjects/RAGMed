@@ -31,6 +31,7 @@ PROGRESS = {
     "check": ("Checking the answer against its sources", DIAGNOSIS_AGENT),
 }
 MAX_QUESTION_CHARS = 4000
+SHOWN_QUERY = 70  # longer search text is cut in progress updates
 AT_CAPACITY = (
     "RAGMed is at capacity right now: it runs on free model quotas that refill every minute. "
     "Please try again in a minute."
@@ -48,7 +49,9 @@ def consult_step(node: str, values: dict[str, Any]) -> Step:
     """Consult progress says what was found, so the care team's work is visible."""
     if node == "search":
         found = len(values.get("passages", []))
-        return f"Searched for “{values.get('query', '')}”: {found} passages", KNOWLEDGE_BASE
+        query = str(values.get("query", ""))
+        shown = query if len(query) <= SHOWN_QUERY else query[: SHOWN_QUERY - 1].rstrip() + "…"
+        return f"Searched for “{shown}”: {found} passages", KNOWLEDGE_BASE
     if node == "weigh" and "result" in values:
         leads = [lead.condition for lead in values["result"].leads]
         text = (

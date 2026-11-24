@@ -73,6 +73,8 @@ class LlmReasoner:
         return await ask_structured(self._small, GroundingCheck, CHECK, user)
 
     async def consult(self, case: str, passages: str) -> ConsultDraft:
-        """Runs on every intake turn, so it uses the small model and shortened passages."""
+        """Runs on every intake turn, on shortened passages. It uses the large model: weighing a
+        differential needs it, and its token budget is separate from the Coordinator's, which
+        talks to the patient on the small model at the same time."""
         user = f"Intake so far:\n{case}\n\nPassages:\n{passages}"
-        return await ask_structured(self._small, ConsultDraft, CONSULT, user)
+        return await ask_structured(self._large, ConsultDraft, CONSULT, user)

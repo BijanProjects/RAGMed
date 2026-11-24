@@ -34,6 +34,7 @@ from coordinator_agent.emergency import EMERGENCY_GUIDANCE, screen
 from coordinator_agent.intake import (
     FINAL_QUESTION,
     MAX_QUESTIONS,
+    WARNING_CHECK,
     Interviewer,
     briefing,
     case_lines,
@@ -41,6 +42,7 @@ from coordinator_agent.intake import (
     is_repeat,
     lead_names,
     merge,
+    natural,
     quick_replies,
 )
 from coordinator_agent.limits import Limits, booking_limit
@@ -113,6 +115,7 @@ class State(TypedDict, total=False):
     questions: int
     asked: list[str]  # the questions alone, without acknowledgements
     asked_final: bool
+    signs_checked: bool  # the warning-sign checklist has been asked
     consult: dict[str, Any] | None  # the Diagnosis agent's latest working picture
     consults: int
     report: dict[str, Any] | None
@@ -223,11 +226,11 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         if not known.get("main_problem"):  # the patient's own first words, never our question
             known["main_problem"] = next(t["text"] for t in transcript if t["role"] == "patient")
         picture, consults = state.get("consult"), state.get("consults", 0)
+        asked = state.get("asked", [])
         if not state.get("asked_final") and consults < MAX_CONSULTS:
-            picture, consults = (
-                await consult(known, state["message"], picture) or picture,
-                consults + 1,
-            )
+            # The answer alone ("No, it builds up slowly") means little without its question.
+            latest = f"{asked[-1]} {state['message']}" if asked else state["message"]
+            picture, consults = await consult(known, latest, picture) or picture, consults + 1
         turn = await interviewer.next_turn(known, history_text(transcript, 40), briefing(picture))
         case = merge(known, turn.updates)
         progress: State = {"case": case, "consult": picture, "consults": consults}
@@ -236,14 +239,24 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
                 case["other_notes"] = state["message"]
             return {**progress, "interview": transcript, "phase": "assessing"}
 
-        asked = state.get("asked", [])
         done = (
             turn.complete
             or not turn.next_question.strip()
             or questions >= MAX_QUESTIONS
             or is_repeat(turn.next_question, asked)  # a third try at the same question
         )
-        if done:  # always end with the open question
+        signs = [str(s) for s in (picture or {}).get("warning_signs", []) if str(s).strip()]
+        pressing = (picture or {}).get("urgency") in ("urgent", "emergency")
+        check_signs = (
+            bool(signs)
+            and not state.get("signs_checked")
+            and questions < MAX_QUESTIONS
+            and (questions >= 1 or done or pressing)  # after the first answer, never skipped
+        )
+        if check_signs:
+            step("Checking the warning signs the Diagnosis agent flagged")
+            question, replies, asked_final, multi = WARNING_CHECK, signs, False, True
+        elif done:  # always end with the open question
             step("I have what the clinician needs; one last open question")
             question, replies, asked_final = FINAL_QUESTION, ["No, that's everything"], True
             multi = False
@@ -251,7 +264,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             question, replies, asked_final = turn.next_question.strip(), turn.quick_replies, False
             multi = turn.multi_select and len(replies) > 1
             step(f"Asking next: {turn.reason.strip() or 'to fill in the picture'}")
-        acknowledgement = turn.acknowledgement.strip()
+        acknowledgement = natural(turn.acknowledgement)
         text = f"{acknowledgement} {question}" if acknowledgement else question
         reply = Reply(
             kind="question",
@@ -265,6 +278,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             "asked": [*asked, question],
             "questions": questions + 1,
             "asked_final": asked_final,
+            "signs_checked": state.get("signs_checked", False) or check_signs,
             "reply": reply.model_dump(),
         }
 
@@ -484,6 +498,7 @@ def _new_intake() -> State:
         "questions": 0,
         "asked": [],
         "asked_final": False,
+        "signs_checked": False,
         "consult": None,
         "consults": 0,
         "report": None,

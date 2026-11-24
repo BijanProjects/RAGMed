@@ -5,6 +5,7 @@ considered, what would tell those possibilities apart, and which warning signs t
 coordinator uses it to choose the one question worth asking next, or to stop.
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from difflib import SequenceMatcher
 from typing import Any, Literal, Protocol
@@ -18,10 +19,13 @@ MAX_QUESTIONS = 10
 MAX_REPLIES = 4
 MAX_CHOICES = 8  # options for a question where several answers can apply
 MAX_REPLY_CHARS = 40
+MAX_CHOICE_CHARS = 70  # a ticked option may be a little longer, e.g. a warning sign
 FINAL_QUESTION = (
     "Is there anything else you would like the clinician to know, such as worries, other "
     "symptoms, or what you hope the visit will cover?"
 )
+
+WARNING_CHECK = "Before we go on, have you had any of these?"
 
 CaseField = Literal[
     "main_problem",
@@ -78,10 +82,11 @@ Deciding what to ask
 - Ask only what would change the picture: something that tells the leading possibilities
   apart, rules a warning sign in or out, or settles how urgent this is or who should see them.
   If no answer would change anything, do not ask it.
-- Lean on the working picture: its "would help to know" and "warning signs" lists are your best
-  next questions. If the working urgency is urgent or emergency, check the warning signs first
-  and keep everything else short. Ask about warning signs plainly, without naming frightening
-  conditions.
+- Lean on the working picture: its "would help to know" list holds your best next questions.
+  The clinic asks its warning signs as a checklist ("Before we go on, have you had any of
+  these?") by itself; do not ask them again. Record what the person ticks, and a "None of
+  these" answer as `negatives`. If they have a warning sign, or the working urgency is urgent
+  or emergency, keep everything else short and finish soon.
 - Read everything the person has said. Never ask for something they already told you, even in
   passing ("for two days" says when it started). Their first message is their main problem.
 - Background (age, medicines, conditions, allergies, pregnancy) only when it matters for this
@@ -274,9 +279,24 @@ def case_summary(case: Mapping[str, str], considered: Sequence[str] = ()) -> str
 
 
 def quick_replies(replies: Sequence[str], multi_select: bool = False) -> list[str]:
-    cleaned = [r.strip() for r in replies if r.strip() and len(r.strip()) <= MAX_REPLY_CHARS]
+    limit = MAX_CHOICE_CHARS if multi_select else MAX_REPLY_CHARS
+    cleaned = [r.strip() for r in replies if r.strip() and len(r.strip()) <= limit]
     unique = list(dict.fromkeys(cleaned))
     return unique[: MAX_CHOICES if multi_select else MAX_REPLIES]
+
+
+_STOCK = re.compile(
+    r"[,;]?\s*(and\s+)?(thank you|thanks)( so much)? for "
+    r"(sharing|letting me know)( that| this)?[.!]?",
+    re.IGNORECASE,
+)
+
+
+def natural(acknowledgement: str) -> str:
+    """Drop stock phrases a small model adds despite being told not to ("Thank you for sharing")."""
+    text = _STOCK.sub(".", acknowledgement).strip(" ,;")
+    text = re.sub(r"\.{2,}", ".", text).strip()
+    return text if sum(c.isalpha() for c in text) >= 3 else ""  # noqa: PLR2004
 
 
 def _normal(question: str) -> str:

@@ -5,6 +5,7 @@ from coordinator_agent.intake import (
     is_repeat,
     is_straightforward_request,
     merge,
+    natural,
     quick_replies,
 )
 from coordinator_agent.reply import build_report, triage
@@ -100,3 +101,9 @@ def test_the_briefing_reads_the_working_picture() -> None:
     assert "change little: no" in text
     assert "none yet" in briefing(None)
     assert "nothing specific yet" in briefing({**CONSULT, "leads": []})
+
+
+def test_stock_phrases_are_dropped_from_acknowledgements() -> None:
+    assert natural("Sounds tough, thank you for sharing.") == "Sounds tough."
+    assert natural("Thanks for sharing that!") == ""
+    assert natural("  A month of that sounds tiring. ") == "A month of that sounds tiring."

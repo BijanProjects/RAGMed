@@ -15,6 +15,7 @@ from coordinator_agent.reply import BOOKING_START, DISCLAIMER, GREETING, OUT_OF_
 from coordinator_agent.router import is_clinic_request
 from coordinator_agent.testing import (
     ANSWER,
+    WITH_SIGNS,
     FakeDiagnosis,
     FakeInterviewer,
     FakeRouter,
@@ -179,12 +180,11 @@ async def test_every_intake_turn_consults_the_diagnosis_agent_first() -> None:
     first, second = chat.diagnosis.consults
     assert first["complaint"] == "I keep getting headaches on one side"
     assert first["leads"] == []
-    assert second["latest"] == "About a month"
+    assert second["latest"] == "How long have you had it? About a month"  # with its question
     assert second["leads"] == ["migraine"]  # the next search starts from the last leads
     briefing = chat.interviewer.briefings[0]
     assert "migraine (one-sided, recurring)" in briefing
     assert "whether light or noise makes it worse" in briefing
-    assert "sudden, worst-ever headache" in briefing
 
 
 async def test_each_step_names_the_agent_doing_it() -> None:
@@ -196,6 +196,48 @@ async def test_each_step_names_the_agent_doing_it() -> None:
     assert chat.steps[0] == ("Care Coordinator", "Reading your message")
     assert agents.index("Knowledge base") < len(agents) - 1
     assert chat.steps[-1] == ("Care Coordinator", "Asking next: it helps tell possibilities apart")
+
+
+async def test_warning_signs_are_checked_as_a_checklist_after_the_first_answer() -> None:
+    questions = ["How long have you had it?", "Unused?", "How bad is it, from 0 to 10?"]
+    chat = Chat(
+        interviewer=FakeInterviewer(questions=questions),
+        diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)),
+    )
+
+    first = await chat.send("I keep getting headaches on one side")
+    check = await chat.send("About a month")
+    after = await chat.send("None of these")
+
+    assert first.text == "How long have you had it?"
+    assert check.text == "Before we go on, have you had any of these?"
+    assert data(check)["multi_select"] is True
+    assert data(check)["quick_replies"] == [
+        "Sudden, worst-ever headache",
+        "Fever with a stiff neck",
+    ]
+    assert after.text == "How bad is it, from 0 to 10?"  # asked once, then the interview goes on
+
+
+async def test_an_urgent_picture_checks_warning_signs_at_once() -> None:
+    chat = Chat(diagnosis=FakeDiagnosis(consult={**WITH_SIGNS, "urgency": "urgent"}))
+
+    first = await chat.send("A bad headache that came on suddenly")
+
+    assert first.text == "Before we go on, have you had any of these?"
+
+
+async def test_the_intake_never_ends_without_the_warning_sign_check() -> None:
+    chat = Chat(
+        interviewer=FakeInterviewer(questions=[]),  # wants to finish at once
+        diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)),
+    )
+
+    check = await chat.send("headaches")
+    final = await chat.send("None of these")
+
+    assert check.text == "Before we go on, have you had any of these?"
+    assert final.text == FINAL_QUESTION
 
 
 async def test_the_intake_carries_on_when_a_consult_fails() -> None:

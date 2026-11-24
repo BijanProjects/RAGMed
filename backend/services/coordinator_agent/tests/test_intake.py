@@ -3,6 +3,7 @@ from coordinator_agent.intake import (
     CaseUpdate,
     briefing,
     case_lines,
+    checklist_question,
     classify_checklist,
     is_repeat,
     is_straightforward_request,
@@ -135,3 +136,11 @@ def test_checklist_answers_are_read_carefully() -> None:
     )
     assert classify_checklist("Yes", offered) == ("yes", [])
     assert classify_checklist("Yes, I hear wheezing sometimes", offered) == ("unclear", [])
+
+
+def test_the_checklist_question_names_who_it_is_about() -> None:
+    assert checklist_question({"main_problem": "headaches"}) == (
+        "Before we go on, have you had any of these?"
+    )
+    assert "has your child" in checklist_question({"main_problem": "My son has a cough"})
+    assert "have they" in checklist_question({"main_problem": "my mom fell"}, again=True)

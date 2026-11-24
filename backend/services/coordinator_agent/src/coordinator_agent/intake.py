@@ -21,17 +21,41 @@ MAX_QUESTIONS = 10
 MAX_REPLIES = 4
 MAX_CHOICES = 8  # options for a question where several answers can apply
 MAX_REPLY_CHARS = 40
-MAX_CHOICE_CHARS = 70  # a ticked option may be a little longer, e.g. a warning sign
+MAX_CHOICE_CHARS = 120  # a ticked option may be longer, e.g. a warning sign (chips wrap)
 FINAL_QUESTION = (
     "Is there anything else you would like the clinician to know, such as worries, other "
     "symptoms, or what you hope the visit will cover?"
 )
 
 WARNING_CHECK = "Before we go on, have you had any of these?"
-WARNING_AGAIN = (
-    "Just to be sure: have you had any of these, now or recently? Tick any that apply, or "
-    "“None of these”."
+_CHILD = re.compile(
+    r"\bmy (\d+[- ](year|month|week)[- ]old|son|daughter|child|kid|baby|toddler|infant|boy|girl)\b",
+    re.IGNORECASE,
 )
+_SOMEONE = re.compile(
+    r"\bmy (husband|wife|partner|mother|mom|mum|father|dad|grandmother|grandfather|"
+    r"grandma|grandpa|brother|sister|friend)\b",
+    re.IGNORECASE,
+)
+
+
+def checklist_question(case: Mapping[str, str], *, again: bool = False) -> str:
+    """The warning-sign question, worded for whoever it is about."""
+    problem = case.get("main_problem", "")
+    subject = (
+        "has your child"
+        if _CHILD.search(problem)
+        else "have they"
+        if _SOMEONE.search(problem)
+        else "have you"
+    )
+    if again:
+        return (
+            f"Just to be sure: {subject} had any of these, now or recently? Tick any that "
+            "apply, or “None of these”."
+        )
+    return f"Before we go on, {subject} had any of these?"
+
 
 CaseField = Literal[
     "main_problem",

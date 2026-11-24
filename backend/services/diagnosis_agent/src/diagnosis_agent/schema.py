@@ -110,7 +110,7 @@ class ConsultDraft(BaseModel):
     )
     warning_signs: list[str] = Field(
         description="Up to 3 warning signs not yet asked about that would make this urgent, "
-        "in plain words (for example 'sudden, worst-ever headache')."
+        "each in plain words and under 10 words (for example 'sudden, worst-ever headache')."
     )
     urgency: Urgency = Field(description="The working urgency from what is known so far.")
     enough: bool = Field(

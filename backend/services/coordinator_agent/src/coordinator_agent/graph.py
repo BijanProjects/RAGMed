@@ -36,12 +36,12 @@ from coordinator_agent.emergency import EMERGENCY_GUIDANCE, screen
 from coordinator_agent.intake import (
     FINAL_QUESTION,
     MAX_QUESTIONS,
-    WARNING_AGAIN,
     WARNING_CHECK,
     Interviewer,
     briefing,
     case_lines,
     case_summary,
+    checklist_question,
     classify_checklist,
     is_repeat,
     lead_names,
@@ -331,7 +331,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             # Not an answer to the checklist: record it as usual and ask the checklist once more.
             step("Your answer did not say which warning signs apply; asking once more")
             case = merge(known, turn.updates)
-            text = f"{natural(turn.acknowledgement)} {WARNING_AGAIN}".strip()
+            text = f"{natural(turn.acknowledgement)} {checklist_question(case, again=True)}".strip()
             again = Reply(
                 kind="question",
                 text=text,
@@ -376,15 +376,16 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
         )
         signs = [str(s) for s in (picture or {}).get("warning_signs", []) if str(s).strip()]
         pressing = (picture or {}).get("urgency") in ("urgent", "emergency")
+        shown_signs = quick_replies(signs, True)  # a checklist is never asked without options
         check_signs = (
-            bool(signs)
+            bool(shown_signs)
             and not state.get("signs_checked")
             and questions < MAX_QUESTIONS
             and (questions >= 1 or done or pressing)  # after the first answer, never skipped
         )
         if check_signs:
             step("Checking the warning signs the Diagnosis agent flagged")
-            question, replies, asked_final, multi = WARNING_CHECK, signs, False, True
+            question, replies, asked_final, multi = WARNING_CHECK, shown_signs, False, True
         elif done:  # always end with the open question
             step("I have what the clinician needs; one last open question")
             question, replies, asked_final = FINAL_QUESTION, ["No, that's everything"], True
@@ -394,7 +395,9 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             multi = turn.multi_select and len(replies) > 1
             step(f"Asking next: {turn.reason.strip() or 'to fill in the picture'}")
         acknowledgement = natural(turn.acknowledgement)
-        text = f"{acknowledgement} {question}" if acknowledgement else question
+        # The checklist is worded for whoever it is about ("has your child had any of these?").
+        shown = checklist_question(case) if question == WARNING_CHECK else question
+        text = f"{acknowledgement} {shown}" if acknowledgement else shown
         reply = Reply(
             kind="question",
             text=text,
@@ -409,7 +412,7 @@ def build_graph(  # noqa: PLR0915 - one closure per step, next to the services i
             "asked_final": asked_final,
             "signs_checked": state.get("signs_checked", False) or check_signs,
             # Only what the patient saw: options too long to show were not offered.
-            "signs_offered": quick_replies(signs, True) if check_signs else offered,
+            "signs_offered": shown_signs if check_signs else offered,
             "reply": reply.model_dump(),
         }
 

@@ -330,6 +330,23 @@ async def test_an_unclear_checklist_answer_is_asked_once_more() -> None:
     assert data(second)["urgency"] == "urgent"
 
 
+async def test_the_checklist_is_worded_for_a_child_and_never_shown_without_options() -> None:
+    long_sign = "A rash that does not fade when you press a glass on it, with fever " * 2
+    chat = Chat(diagnosis=FakeDiagnosis(consult={**WITH_SIGNS, "warning_signs": [long_sign]}))
+
+    await chat.send("My 3-year-old has a fever and a rash")
+    second = await chat.send("Flat red spots")
+
+    assert second.text == "How bad is it, from 0 to 10?"  # no options to show: no checklist
+
+    chat = Chat(diagnosis=FakeDiagnosis(consult=dict(WITH_SIGNS)))
+    await chat.send("My 3-year-old has a fever and a rash")
+    check = await chat.send("Flat red spots")
+
+    assert check.text == "Before we go on, has your child had any of these?"
+    assert len(data(check)["quick_replies"]) == 2
+
+
 async def test_an_urgent_picture_checks_warning_signs_at_once() -> None:
     chat = Chat(diagnosis=FakeDiagnosis(consult={**WITH_SIGNS, "urgency": "urgent"}))
 
